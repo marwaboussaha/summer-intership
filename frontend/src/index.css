@@ -1,0 +1,67 @@
+:root {
+  /* Palette — inspirée d'une console audio analogique, pas d'un dashboard SaaS générique */
+  --bg: #0d1013;
+  --bg-grain: #11151a;
+  --panel: #161b21;
+  --panel-alt: #1b2129;
+  --border: #262d36;
+  --text-primary: #eef1f4;
+  --text-secondary: #8a93a3;
+  --text-muted: #565f6d;
+
+  --accent-cyan: #5eead4; /* onde vocale / vu-mètre */
+  --accent-amber: #f2b84b; /* enregistrement en cours */
+  --accent-red: #ef6461; /* erreurs */
+  --accent-violet: #b9a6ff; /* code généré */
+
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 20px;
+
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text-primary);
+  font-family: var(--font-body);
+}
+
+#root {
+  min-height: 100vh;
+}
+
+button {
+  font-family: inherit;
+}
+
+::selection {
+  background: var(--accent-cyan);
+  color: #0d1013;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent-cyan);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+}
