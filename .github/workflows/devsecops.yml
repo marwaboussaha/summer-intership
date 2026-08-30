@@ -1,0 +1,365 @@
+name: DevSecOps Pipeline VoiceCraft (19 étapes)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}-backend
+
+jobs:
+
+  # ═══════════════════════════════════════════════════════
+  # 3. SECRET SCANNING
+  # ═══════════════════════════════════════════════════════
+  secret-scanning:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+
+  # ═══════════════════════════════════════════════════════
+  # 4. INSTALL DEPENDENCIES
+  # ═══════════════════════════════════════════════════════
+  install-dependencies:
+    runs-on: ubuntu-latest
+    needs: secret-scanning
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Installer backend
+        working-directory: backend
+        run: npm ci
+
+      - name: Installer frontend
+        working-directory: frontend
+        run: npm ci
+
+      # Réutilisé par les jobs suivants sans réinstaller
+      - name: Archiver node_modules (backend)
+        run: tar -czf backend-modules.tar.gz backend/node_modules
+      - uses: actions/upload-artifact@v4
+        with: { name: backend-modules, path: backend-modules.tar.gz }
+
+      - name: Archiver node_modules (frontend)
+        run: tar -czf frontend-modules.tar.gz frontend/node_modules
+      - uses: actions/upload-artifact@v4
+        with: { name: frontend-modules, path: frontend-modules.tar.gz }
+
+  # ═══════════════════════════════════════════════════════
+  # 5. SAST  (parallèle avec SCA — les deux dépendent
+  #           uniquement de install-dependencies)
+  # ═══════════════════════════════════════════════════════
+  sast:
+    runs-on: ubuntu-latest
+    needs: install-dependencies
+    steps:
+      - uses: actions/checkout@v4
+      - name: Semgrep
+        run: |
+          pip install semgrep
+          semgrep --config p/nodejs --config p/owasp-top-ten --error .
+
+  # ═══════════════════════════════════════════════════════
+  # 6. SCA  (parallèle avec SAST)
+  # ═══════════════════════════════════════════════════════
+  sca:
+    runs-on: ubuntu-latest
+    needs: install-dependencies
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: backend-modules }
+      - run: tar -xzf backend-modules.tar.gz
+
+      - name: npm audit — backend
+        working-directory: backend
+        run: npm audit --audit-level=high
+
+      - name: npm audit — frontend
+        working-directory: frontend
+        run: npm ci && npm audit --audit-level=high
+
+  # ═══════════════════════════════════════════════════════
+  # 7. BUILD  (attend SAST *et* SCA)
+  # ═══════════════════════════════════════════════════════
+  build:
+    runs-on: ubuntu-latest
+    needs: [sast, sca]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+
+      - uses: actions/download-artifact@v4
+        with: { name: backend-modules }
+      - run: tar -xzf backend-modules.tar.gz
+
+      - name: Vérifier la syntaxe backend
+        run: |
+          for f in $(find backend -name "*.js" -not -path "*/node_modules/*"); do
+            node --check "$f"
+          done
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm ci && npm run build
+
+  # ═══════════════════════════════════════════════════════
+  # 8. UNIT TESTS
+  # ═══════════════════════════════════════════════════════
+  unit-tests:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: actions/download-artifact@v4
+        with: { name: backend-modules }
+      - run: tar -xzf backend-modules.tar.gz
+
+      - name: Tests unitaires backend
+        working-directory: backend
+        run: npm test --if-present
+        continue-on-error: true   # à retirer une fois de vrais tests écrits
+
+  # ═══════════════════════════════════════════════════════
+  # 9. INTEGRATION TESTS
+  # ═══════════════════════════════════════════════════════
+  integration-tests:
+    runs-on: ubuntu-latest
+    needs: unit-tests
+    services:
+      mongodb:
+        image: mongo:7
+        ports: ["27017:27017"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20" }
+      - uses: actions/download-artifact@v4
+        with: { name: backend-modules }
+      - run: tar -xzf backend-modules.tar.gz
+
+      - name: Démarrer le serveur et tester /api/health
+        working-directory: backend
+        env:
+          MONGO_URI: mongodb://localhost:27017/voicecraft-ci
+          JWT_SECRET: ci-secret
+          GROQ_API_KEY: dummy-key
+        run: |
+          node server.js &
+          sleep 3
+          curl -f http://localhost:5000/api/health
+
+  # ═══════════════════════════════════════════════════════
+  # 10. DOCKER BUILD
+  # ═══════════════════════════════════════════════════════
+  docker-build:
+    runs-on: ubuntu-latest
+    needs: integration-tests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image backend
+        run: docker build -t voicecraft-backend:${{ github.sha }} -f backend/Dockerfile backend
+      - run: docker save voicecraft-backend:${{ github.sha }} -o /tmp/image.tar
+      - uses: actions/upload-artifact@v4
+        with: { name: docker-image, path: /tmp/image.tar }
+
+  # ═══════════════════════════════════════════════════════
+  # 11. CONTAINER IMAGE SCAN
+  # ═══════════════════════════════════════════════════════
+  container-scan:
+    runs-on: ubuntu-latest
+    needs: docker-build
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load -i /tmp/image.tar
+
+      - name: Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "voicecraft-backend:${{ github.sha }}"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+          format: "sarif"
+          output: "trivy.sarif"
+
+      - name: Upload vers GitHub Security
+        if: always()
+        uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: "trivy.sarif" }
+
+  # ═══════════════════════════════════════════════════════
+  # 12. IaC SECURITY SCAN
+  # ═══════════════════════════════════════════════════════
+  iac-scan:
+    runs-on: ubuntu-latest
+    needs: container-scan
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkov
+        uses: bridgecrewio/checkov-action@master
+        with:
+          directory: .
+          framework: dockerfile
+          soft_fail_on: "LOW,MEDIUM"
+
+  # ═══════════════════════════════════════════════════════
+  # 13. PUSH TO REGISTRY
+  # ═══════════════════════════════════════════════════════
+  push-registry:
+    runs-on: ubuntu-latest
+    needs: iac-scan
+    permissions: { contents: read, packages: write }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with: { name: docker-image, path: /tmp }
+      - run: docker load -i /tmp/image.tar
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tag et push
+        run: |
+          IMAGE_ID=${{ env.REGISTRY }}/$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')
+          docker tag voicecraft-backend:${{ github.sha }} $IMAGE_ID:${{ github.sha }}
+          docker tag voicecraft-backend:${{ github.sha }} $IMAGE_ID:latest
+          docker push $IMAGE_ID:${{ github.sha }}
+          docker push $IMAGE_ID:latest
+
+  # ═══════════════════════════════════════════════════════
+  # 14. DEPLOY TO STAGING
+  # ═══════════════════════════════════════════════════════
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: push-registry
+    environment: staging
+    steps:
+      - name: Déployer en staging
+        run: |
+          echo "⚠️ À personnaliser selon votre hébergement réel (VPS, Render...)."
+          # ssh ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} \
+          #   "docker pull ${{ env.REGISTRY }}/... && docker restart voicecraft-backend"
+
+  # ═══════════════════════════════════════════════════════
+  # 15. DAST
+  # ═══════════════════════════════════════════════════════
+  dast:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: "https://staging.votre-domaine.example/api/health"
+          cmd_options: "-I"
+
+  # ═══════════════════════════════════════════════════════
+  # 16. SECURITY / QUALITY GATE
+  #     Point de contrôle explicite avant la production
+  # ═══════════════════════════════════════════════════════
+  security-quality-gate:
+    runs-on: ubuntu-latest
+    needs:
+      - secret-scanning
+      - sast
+      - sca
+      - container-scan
+      - iac-scan
+      - dast
+    steps:
+      - name: Vérifier que tous les contrôles de sécurité sont passés
+        run: |
+          echo "✅ Secret scanning : ${{ needs.secret-scanning.result }}"
+          echo "✅ SAST : ${{ needs.sast.result }}"
+          echo "✅ SCA : ${{ needs.sca.result }}"
+          echo "✅ Container scan : ${{ needs.container-scan.result }}"
+          echo "✅ IaC scan : ${{ needs.iac-scan.result }}"
+          echo "✅ DAST : ${{ needs.dast.result }}"
+          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
+            echo "❌ Au moins un contrôle de sécurité a échoué — production bloquée."
+            exit 1
+          fi
+          echo "🟢 Tous les contrôles sont passés — déploiement en production autorisé."
+
+  # ═══════════════════════════════════════════════════════
+  # 17. DEPLOY TO PRODUCTION
+  #     Validation manuelle requise (via GitHub Environments)
+  # ═══════════════════════════════════════════════════════
+  deploy-production:
+    runs-on: ubuntu-latest
+    needs: security-quality-gate
+    environment: production   # configurez "Required reviewers" sur cet environnement
+    steps:
+      - name: Déployer en production
+        run: |
+          echo "⚠️ À personnaliser selon votre hébergement réel."
+          # ssh ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} \
+          #   "docker pull ${{ env.REGISTRY }}/... && docker restart voicecraft-backend"
+
+  # ═══════════════════════════════════════════════════════
+  # 18. MONITORING & RUNTIME SECURITY
+  # ═══════════════════════════════════════════════════════
+  monitoring:
+    runs-on: ubuntu-latest
+    needs: deploy-production
+    steps:
+      - name: Healthcheck production
+        id: healthcheck
+        run: |
+          sleep 10
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://votre-domaine.example/api/health)
+          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
+
+      - name: Vérifier le résultat
+        if: steps.healthcheck.outputs.status != '200'
+        run: |
+          echo "🚨 Incident détecté : code ${{ steps.healthcheck.outputs.status }}"
+          exit 1
+
+  # ═══════════════════════════════════════════════════════
+  # 19. FEEDBACK / INCIDENT RESPONSE
+  #     Se déclenche uniquement si monitoring échoue
+  # ═══════════════════════════════════════════════════════
+  incident-response:
+    runs-on: ubuntu-latest
+    needs: monitoring
+    if: failure()
+    steps:
+      - name: Créer une issue GitHub automatiquement
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Incident production détecté — run ${context.runId}`,
+              body: `Le monitoring a détecté une anomalie après le déploiement en production.\n\nCommit : ${context.sha}\nWorkflow : ${context.workflow}\n\nCe ticket alimente le prochain cycle (retour à l'étape 1 - Plan/Design).`,
+              labels: ["incident", "production"]
+            });
+
+      # Exemple d'intégration Slack (nécessite le secret SLACK_WEBHOOK_URL) :
+      # - name: Alerte Slack
+      #   run: |
+      #     curl -X POST -H 'Content-type: application/json' \
+      #       --data '{"text":"🚨 Incident VoiceCraft en production"}' \
+      #       ${{ secrets.SLACK_WEBHOOK_URL }}
