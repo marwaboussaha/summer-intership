@@ -1,365 +1,252 @@
-name: DevSecOps Pipeline VoiceCraft (19 étapes)
+##############################################################################
+# devsecops.yml
+# Pipeline DevSecOps (GitLab CI/CD)
+#
+# Ordre : Gitleaks -> Install Dependencies -> SAST (SonarQube) -> Quality Gate
+#         -> SCA (Snyk) -> Build (front/back/db) -> Trivy -> Tag & Push
+#         -> Deploy -> DAST (OWASP ZAP)
+##############################################################################
 
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
+stages:
+  - secret-scan
+  - install
+  - sast
+  - quality-gate
+  - dependency-scan
+  - build
+  - image-scan
+  - push
+  - deploy
+  - dast
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}-backend
+variables:
+  REGISTRY: "registry.gitlab.com/${CI_PROJECT_PATH}"
+  IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
+  SONAR_HOST_URL: "https://sonarqube.example.com"
+  STAGING_URL: "https://staging.monapp.com"
 
-jobs:
+##############################################################################
+# 1. SECRET SCANNING - Gitleaks
+##############################################################################
+gitleaks:
+  stage: secret-scan
+  image: zricethezav/gitleaks:latest
+  script:
+    - echo "Scan des secrets avec Gitleaks..."
+    - gitleaks detect --source . --verbose --redact --exit-code 1
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
+  allow_failure: false   # FAIL -> STOP
 
-  # ═══════════════════════════════════════════════════════
-  # 3. SECRET SCANNING
-  # ═══════════════════════════════════════════════════════
-  secret-scanning:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-        with: { fetch-depth: 0 }
-      - name: Gitleaks
-        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7  # v2
+##############################################################################
+# 2. INSTALL DEPENDENCIES
+##############################################################################
+install-dependencies:
+  stage: install
+  image: node:18-alpine
+  script:
+    - echo "Installation des dépendances Front..."
+    - cd frontend && npm ci && cd ..
+    - echo "Installation des dépendances Back..."
+    - cd backend && npm ci && cd ..
+  artifacts:
+    paths:
+      - frontend/node_modules
+      - backend/node_modules
+    expire_in: 1 hour
+  allow_failure: false   # FAIL -> STOP
 
-  # ═══════════════════════════════════════════════════════
-  # 4. INSTALL DEPENDENCIES
-  # ═══════════════════════════════════════════════════════
-  install-dependencies:
-    runs-on: ubuntu-latest
-    needs: secret-scanning
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
+##############################################################################
+# 3. SAST - SonarQube
+##############################################################################
+sast-sonarqube:
+  stage: sast
+  image: sonarsource/sonar-scanner-cli:latest
+  needs: ["install-dependencies"]
+  script:
+    - echo "Analyse statique du code avec SonarQube..."
+    - sonar-scanner
+      -Dsonar.projectKey=${CI_PROJECT_NAME}
+      -Dsonar.sources=.
+      -Dsonar.host.url=${SONAR_HOST_URL}
+      -Dsonar.login=${SONAR_TOKEN}
+  allow_failure: false
 
-      - name: Installer backend
-        working-directory: backend
-        run: npm ci
+##############################################################################
+# 4. SAST QUALITY GATE - vérification du statut SonarQube
+##############################################################################
+sast-quality-gate:
+  stage: quality-gate
+  image: curlimages/curl:latest
+  needs: ["sast-sonarqube"]
+  script:
+    - echo "Vérification de la Quality Gate SonarQube..."
+    - |
+      STATUS=$(curl -s -u ${SONAR_TOKEN}: \
+        "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${CI_PROJECT_NAME}" \
+        | grep -o '"status":"[A-Z]*"' | head -1 | cut -d'"' -f4)
+      echo "Quality Gate status: $STATUS"
+      if [ "$STATUS" != "OK" ]; then
+        echo "❌ Quality Gate échouée (Critical/High vulnerabilities ou seuils non atteints)"
+        exit 1
+      fi
+      echo "✅ Quality Gate passée"
+  allow_failure: false   # Gate Failed -> STOP
 
-      - name: Installer frontend
-        working-directory: frontend
-        run: npm ci
+##############################################################################
+# 5. SCA - Snyk (Dependency Scan)
+##############################################################################
+dependency-scan-snyk:
+  stage: dependency-scan
+  image: snyk/snyk:node
+  needs: ["install-dependencies", "sast-quality-gate"]
+  script:
+    - echo "Scan des dépendances avec Snyk..."
+    - snyk auth ${SNYK_TOKEN}
+    - snyk test --severity-threshold=high --all-projects
+  allow_failure: false   # Critical/High -> STOP (Medium/Low géré par --severity-threshold)
 
-      # Réutilisé par les jobs suivants sans réinstaller
-      - name: Archiver node_modules (backend)
-        run: tar -czf backend-modules.tar.gz backend/node_modules
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with: { name: backend-modules, path: backend-modules.tar.gz }
+##############################################################################
+# 6. BUILD - Images Front / Back / Database
+##############################################################################
+build-frontend:
+  stage: build
+  image: docker:24
+  services: [docker:24-dind]
+  needs: ["dependency-scan-snyk"]
+  script:
+    - docker build -t ${REGISTRY}/frontend:${IMAGE_TAG} ./frontend
+    - docker save ${REGISTRY}/frontend:${IMAGE_TAG} -o frontend-image.tar
+  artifacts:
+    paths: [frontend-image.tar]
+    expire_in: 1 hour
+  allow_failure: false
 
-      - name: Archiver node_modules (frontend)
-        run: tar -czf frontend-modules.tar.gz frontend/node_modules
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with: { name: frontend-modules, path: frontend-modules.tar.gz }
+build-backend:
+  stage: build
+  image: docker:24
+  services: [docker:24-dind]
+  needs: ["dependency-scan-snyk"]
+  script:
+    - docker build -t ${REGISTRY}/backend:${IMAGE_TAG} ./backend
+    - docker save ${REGISTRY}/backend:${IMAGE_TAG} -o backend-image.tar
+  artifacts:
+    paths: [backend-image.tar]
+    expire_in: 1 hour
+  allow_failure: false
 
-  # ═══════════════════════════════════════════════════════
-  # 5. SAST  (parallèle avec SCA — les deux dépendent
-  #           uniquement de install-dependencies)
-  # ═══════════════════════════════════════════════════════
-  sast:
-    runs-on: ubuntu-latest
-    needs: install-dependencies
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - name: Semgrep
-        run: |
-          pip install semgrep
-          semgrep --config p/nodejs --config p/owasp-top-ten --error .
+build-database:
+  stage: build
+  image: docker:24
+  services: [docker:24-dind]
+  needs: ["dependency-scan-snyk"]
+  script:
+    - docker build -t ${REGISTRY}/database:${IMAGE_TAG} ./database
+    - docker save ${REGISTRY}/database:${IMAGE_TAG} -o database-image.tar
+  artifacts:
+    paths: [database-image.tar]
+    expire_in: 1 hour
+  allow_failure: false
 
-  # ═══════════════════════════════════════════════════════
-  # 6. SCA  (parallèle avec SAST)
-  # ═══════════════════════════════════════════════════════
-  sca:
-    runs-on: ubuntu-latest
-    needs: install-dependencies
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
-        with: { name: backend-modules }
-      - run: tar -xzf backend-modules.tar.gz
+##############################################################################
+# 7. IMAGE SCAN - Trivy (Vulnerability Scan)
+##############################################################################
+.trivy-template: &trivy-scan
+  stage: image-scan
+  image: aquasec/trivy:latest
+  script:
+    - docker load -i ${IMAGE_FILE}
+    - echo "Scan Trivy de l'image ${IMAGE_NAME}..."
+    - trivy image
+      --severity CRITICAL,HIGH
+      --exit-code 1
+      --no-progress
+      ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+    - trivy image
+      --severity MEDIUM,LOW
+      --exit-code 0
+      --no-progress
+      ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
+  allow_failure: false   # Critical/High -> STOP
 
-      - name: npm audit — backend
-        working-directory: backend
-        run: npm audit --audit-level=high
+scan-frontend-image:
+  <<: *trivy-scan
+  needs: ["build-frontend"]
+  variables:
+    IMAGE_FILE: frontend-image.tar
+    IMAGE_NAME: frontend
 
-      - name: npm audit — frontend
-        working-directory: frontend
-        run: npm ci && npm audit --audit-level=high
+scan-backend-image:
+  <<: *trivy-scan
+  needs: ["build-backend"]
+  variables:
+    IMAGE_FILE: backend-image.tar
+    IMAGE_NAME: backend
 
-  # ═══════════════════════════════════════════════════════
-  # 7. BUILD  (attend SAST *et* SCA)
-  # ═══════════════════════════════════════════════════════
-  build:
-    runs-on: ubuntu-latest
-    needs: [sast, sca]
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with: { node-version: "20" }
+scan-database-image:
+  <<: *trivy-scan
+  needs: ["build-database"]
+  variables:
+    IMAGE_FILE: database-image.tar
+    IMAGE_NAME: database
 
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
-        with: { name: backend-modules }
-      - run: tar -xzf backend-modules.tar.gz
+##############################################################################
+# 8. TAG & PUSH - Registry
+##############################################################################
+tag-and-push:
+  stage: push
+  image: docker:24
+  services: [docker:24-dind]
+  needs:
+    - scan-frontend-image
+    - scan-backend-image
+    - scan-database-image
+  script:
+    - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin ${REGISTRY}
+    - for svc in frontend backend database; do
+        docker load -i ${svc}-image.tar;
+        docker tag ${REGISTRY}/${svc}:${IMAGE_TAG} ${REGISTRY}/${svc}:latest;
+        docker push ${REGISTRY}/${svc}:${IMAGE_TAG};
+        docker push ${REGISTRY}/${svc}:latest;
+      done
+  allow_failure: false
 
-      - name: Vérifier la syntaxe backend
-        run: |
-          for f in $(find backend -name "*.js" -not -path "*/node_modules/*"); do
-            node --check "$f"
-          done
+##############################################################################
+# 9. DEPLOY - Staging
+##############################################################################
+deploy-staging:
+  stage: deploy
+  image: bitnami/kubectl:latest
+  needs: ["tag-and-push"]
+  script:
+    - echo "Déploiement sur l'environnement de staging..."
+    - kubectl set image deployment/frontend frontend=${REGISTRY}/frontend:${IMAGE_TAG} -n staging
+    - kubectl set image deployment/backend backend=${REGISTRY}/backend:${IMAGE_TAG} -n staging
+    - kubectl set image deployment/database database=${REGISTRY}/database:${IMAGE_TAG} -n staging
+    - kubectl rollout status deployment/frontend -n staging
+    - kubectl rollout status deployment/backend -n staging
+  allow_failure: false   # FAIL -> STOP
 
-      - name: Build frontend
-        working-directory: frontend
-        run: npm ci && npm run build
+##############################################################################
+# 10. DAST - OWASP ZAP
+##############################################################################
+dast-owasp-zap:
+  stage: dast
+  image: ghcr.io/zaproxy/zaproxy:stable
+  needs: ["deploy-staging"]
+  script:
+    - echo "Scan dynamique (DAST) avec OWASP ZAP sur ${STAGING_URL}..."
+    - zap-baseline.py
+      -t ${STAGING_URL}
+      -r zap-report.html
+      -l HIGH
+      -I
+  artifacts:
+    paths: [zap-report.html]
+    when: always
+  allow_failure: false   # Critical/High -> STOP / Rollback
 
-  # ═══════════════════════════════════════════════════════
-  # 8. UNIT TESTS
-  # ═══════════════════════════════════════════════════════
-  unit-tests:
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with: { node-version: "20" }
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
-        with: { name: backend-modules }
-      - run: tar -xzf backend-modules.tar.gz
-
-      - name: Tests unitaires backend
-        working-directory: backend
-        run: npm test --if-present
-        continue-on-error: true   # à retirer une fois de vrais tests écrits
-
-  # ═══════════════════════════════════════════════════════
-  # 9. INTEGRATION TESTS
-  # ═══════════════════════════════════════════════════════
-  integration-tests:
-    runs-on: ubuntu-latest
-    needs: unit-tests
-    services:
-      mongodb:
-        image: mongo:7
-        ports: ["27017:27017"]
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with: { node-version: "20" }
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
-        with: { name: backend-modules }
-      - run: tar -xzf backend-modules.tar.gz
-
-      - name: Démarrer le serveur et tester /api/health
-        working-directory: backend
-        env:
-          MONGO_URI: mongodb://localhost:27017/voicecraft-ci
-          JWT_SECRET: ci-secret
-          GROQ_API_KEY: dummy-key
-        run: |
-          node server.js &
-          sleep 3
-          curl -f http://localhost:5000/api/health
-
-  # ═══════════════════════════════════════════════════════
-  # 10. DOCKER BUILD
-  # ═══════════════════════════════════════════════════════
-  docker-build:
-    runs-on: ubuntu-latest
-    needs: integration-tests
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - name: Build image backend
-        run: docker build -t voicecraft-backend:${{ github.sha }} -f backend/Dockerfile backend
-      - run: docker save voicecraft-backend:${{ github.sha }} -o /tmp/image.tar
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with: { name: docker-image, path: /tmp/image.tar }
-
-  # ═══════════════════════════════════════════════════════
-  # 11. CONTAINER IMAGE SCAN
-  # ═══════════════════════════════════════════════════════
-  container-scan:
-    runs-on: ubuntu-latest
-    needs: docker-build
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
-        with: { name: docker-image, path: /tmp }
-      - run: docker load -i /tmp/image.tar
-
-      - name: Trivy
-        uses: aquasecurity/trivy-action@d2a0b60797ff03db6132bd4e2b293f9b37081297  # master
-        with:
-          image-ref: "voicecraft-backend:${{ github.sha }}"
-          severity: "CRITICAL,HIGH"
-          exit-code: "1"
-          format: "sarif"
-          output: "trivy.sarif"
-
-      - name: Upload vers GitHub Security
-        if: always()
-        uses: github/codeql-action/upload-sarif@6f5948dfacef28e207b48d0905cf90c03365536d  # v3
-        with: { sarif_file: "trivy.sarif" }
-
-  # ═══════════════════════════════════════════════════════
-  # 12. IaC SECURITY SCAN
-  # ═══════════════════════════════════════════════════════
-  iac-scan:
-    runs-on: ubuntu-latest
-    needs: container-scan
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - name: Checkov
-        uses: bridgecrewio/checkov-action@f967808197a8d784d3e72919f38c3ff0cda7884e  # master
-        with:
-          directory: .
-          framework: dockerfile
-          soft_fail_on: "LOW,MEDIUM"
-
-  # ═══════════════════════════════════════════════════════
-  # 13. PUSH TO REGISTRY
-  # ═══════════════════════════════════════════════════════
-  push-registry:
-    runs-on: ubuntu-latest
-    needs: iac-scan
-    permissions: { contents: read, packages: write }
-    steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262  # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
-        with: { name: docker-image, path: /tmp }
-      - run: docker load -i /tmp/image.tar
-
-      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Tag et push
-        run: |
-          IMAGE_ID=${{ env.REGISTRY }}/$(echo ${{ env.IMAGE_NAME }} | tr '[:upper:]' '[:lower:]')
-          docker tag voicecraft-backend:${{ github.sha }} $IMAGE_ID:${{ github.sha }}
-          docker tag voicecraft-backend:${{ github.sha }} $IMAGE_ID:latest
-          docker push $IMAGE_ID:${{ github.sha }}
-          docker push $IMAGE_ID:latest
-
-  # ═══════════════════════════════════════════════════════
-  # 14. DEPLOY TO STAGING
-  # ═══════════════════════════════════════════════════════
-  deploy-staging:
-    runs-on: ubuntu-latest
-    needs: push-registry
-    environment: staging
-    steps:
-      - name: Déployer en staging
-        run: |
-          echo "⚠️ À personnaliser selon votre hébergement réel (VPS, Render...)."
-          # ssh ${{ secrets.STAGING_USER }}@${{ secrets.STAGING_HOST }} \
-          #   "docker pull ${{ env.REGISTRY }}/... && docker restart voicecraft-backend"
-
-  # ═══════════════════════════════════════════════════════
-  # 15. DAST
-  # ═══════════════════════════════════════════════════════
-  dast:
-    runs-on: ubuntu-latest
-    needs: deploy-staging
-    steps:
-      - name: OWASP ZAP Baseline Scan
-        uses: zaproxy/action-baseline@66042c8e7e24680119199a017e5b0e8603bf4dae  # v0.12.0
-        with:
-          target: "https://staging.votre-domaine.example/api/health"
-          cmd_options: "-I"
-
-  # ═══════════════════════════════════════════════════════
-  # 16. SECURITY / QUALITY GATE
-  #     Point de contrôle explicite avant la production
-  # ═══════════════════════════════════════════════════════
-  security-quality-gate:
-    runs-on: ubuntu-latest
-    needs:
-      - secret-scanning
-      - sast
-      - sca
-      - container-scan
-      - iac-scan
-      - dast
-    steps:
-      - name: Vérifier que tous les contrôles de sécurité sont passés
-        run: |
-          echo "✅ Secret scanning : ${{ needs.secret-scanning.result }}"
-          echo "✅ SAST : ${{ needs.sast.result }}"
-          echo "✅ SCA : ${{ needs.sca.result }}"
-          echo "✅ Container scan : ${{ needs.container-scan.result }}"
-          echo "✅ IaC scan : ${{ needs.iac-scan.result }}"
-          echo "✅ DAST : ${{ needs.dast.result }}"
-          if [[ "${{ contains(needs.*.result, 'failure') }}" == "true" ]]; then
-            echo "❌ Au moins un contrôle de sécurité a échoué — production bloquée."
-            exit 1
-          fi
-          echo "🟢 Tous les contrôles sont passés — déploiement en production autorisé."
-
-  # ═══════════════════════════════════════════════════════
-  # 17. DEPLOY TO PRODUCTION
-  #     Validation manuelle requise (via GitHub Environments)
-  # ═══════════════════════════════════════════════════════
-  deploy-production:
-    runs-on: ubuntu-latest
-    needs: security-quality-gate
-    environment: production   # configurez "Required reviewers" sur cet environnement
-    steps:
-      - name: Déployer en production
-        run: |
-          echo "⚠️ À personnaliser selon votre hébergement réel."
-          # ssh ${{ secrets.PROD_USER }}@${{ secrets.PROD_HOST }} \
-          #   "docker pull ${{ env.REGISTRY }}/... && docker restart voicecraft-backend"
-
-  # ═══════════════════════════════════════════════════════
-  # 18. MONITORING & RUNTIME SECURITY
-  # ═══════════════════════════════════════════════════════
-  monitoring:
-    runs-on: ubuntu-latest
-    needs: deploy-production
-    steps:
-      - name: Healthcheck production
-        id: healthcheck
-        run: |
-          sleep 10
-          STATUS=$(curl -s -o /dev/null -w "%{http_code}" https://votre-domaine.example/api/health)
-          echo "status=$STATUS" >> "$GITHUB_OUTPUT"
-
-      - name: Vérifier le résultat
-        if: steps.healthcheck.outputs.status != '200'
-        run: |
-          echo "🚨 Incident détecté : code ${{ steps.healthcheck.outputs.status }}"
-          exit 1
-
-  # ═══════════════════════════════════════════════════════
-  # 19. FEEDBACK / INCIDENT RESPONSE
-  #     Se déclenche uniquement si monitoring échoue
-  # ═══════════════════════════════════════════════════════
-  incident-response:
-    runs-on: ubuntu-latest
-    needs: monitoring
-    if: failure()
-    steps:
-      - name: Créer une issue GitHub automatiquement
-        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b  # v7
-        with:
-          script: |
-            await github.rest.issues.create({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              title: `🚨 Incident production détecté — run ${context.runId}`,
-              body: `Le monitoring a détecté une anomalie après le déploiement en production.\n\nCommit : ${context.sha}\nWorkflow : ${context.workflow}\n\nCe ticket alimente le prochain cycle (retour à l'étape 1 - Plan/Design).`,
-              labels: ["incident", "production"]
-            });
-
-      # Exemple d'intégration Slack (nécessite le secret SLACK_WEBHOOK_URL) :
-      # - name: Alerte Slack
-      #   run: |
-      #     curl -X POST -H 'Content-type: application/json' \
-      #       --data '{"text":"🚨 Incident VoiceCraft en production"}' \
-      #       ${{ secrets.SLACK_WEBHOOK_URL }}
+##############################################################################
+# Fin du pipeline : si toutes les étapes passent -> déploiement production
+# (à ajouter séparément avec approbation manuelle, ex: "when: manual")
+##############################################################################
