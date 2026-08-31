@@ -66,13 +66,59 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
+      # Vérification explicite : si ce fichier n'existe pas ici, le scan
+      # n'a pas généré de tâche d'analyse (mauvais sonar.projectBaseDir,
+      # scan qui n'a pas tourné, etc). On préfère planter ICI avec un
+      # message clair plutôt que 2 jobs plus tard dans sast-quality-gate.
+      - name: Vérifier que le rapport Sonar existe
+        run: |
+          if [ ! -f .scannerwork/report-task.txt ]; then
+            echo "::error::.scannerwork/report-task.txt introuvable après le scan Sonar."
+            exit 1
+          fi
+          echo "Rapport trouvé :"
+          cat .scannerwork/report-task.txt
+
+      # /!\ CORRECTIF PRINCIPAL /!\
+      # actions/upload-artifact@v4 IGNORE par défaut les fichiers et dossiers
+      # cachés (commençant par un point). Comme .scannerwork/ est un dossier
+      # caché, l'upload "réussissait" mais l'artefact était vide, donc
+      # sast-quality-gate ne trouvait jamais le fichier au téléchargement.
+      # include-hidden-files: true force l'inclusion de .scannerwork/.
+      # if-no-files-found: error fait planter CE job si jamais le fichier
+      # n'est plus là, au lieu d'un échec silencieux et différé.
+      - name: Uploader le report SonarQube (report-task.txt)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-report
+          path: .scannerwork/report-task.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
   ##########################################################################
-  # 4. SAST QUALITY GATE
+  # 4. SAST QUALITY GATE (job séparé, comme demandé)
   ##########################################################################
   sast-quality-gate:
     runs-on: ubuntu-latest
     needs: sast-sonarqube
     steps:
+      # Récupère report-task.txt uploadé par le job précédent, et le replace
+      # dans .scannerwork/ pour que sonarqube-quality-gate-action le trouve
+      # au même chemin relatif qu'attendu (.scannerwork/report-task.txt).
+      - name: Télécharger le report SonarQube
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-report
+          path: .scannerwork
+
+      - name: Vérifier que le fichier est bien arrivé
+        run: |
+          if [ ! -f .scannerwork/report-task.txt ]; then
+            echo "::error::report-task.txt absent après téléchargement de l'artefact."
+            exit 1
+          fi
+
       - name: Vérifier la Quality Gate SonarQube
         uses: sonarsource/sonarqube-quality-gate-action@master
         timeout-minutes: 5

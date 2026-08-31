@@ -1,0 +1,15 @@
+# Fichier requis par le job "dast-owasp-zap" (zaproxy/action-baseline).
+# Chemin attendu dans le repo : .zap/rules.tsv
+#
+# Il sert à surclasser le comportement par défaut de ZAP pour certaines
+# règles d'alerte (par ID), afin d'éviter les faux positifs bloquants
+# sur un scan baseline.
+#
+# Format : RULE_ID<TAB>THRESHOLD<TAB>commentaire (optionnel)
+# THRESHOLD possibles : IGNORE (ignorer complètement), WARN (afficher
+# sans faire échouer), FAIL (faire échouer le job même en scan baseline)
+#
+# Exemples courants à adapter à ton appli :
+10096	WARN	Timestamp Disclosure - souvent un faux positif sur assets statiques
+10109	WARN	Modern Web Application - lié au JS côté client, à valider manuellement
+10202	WARN	Absence of Anti-CSRF Tokens - à confirmer si l'app utilise des tokens custom
