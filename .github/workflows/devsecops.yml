@@ -1,0 +1,6 @@
+name: DevSecOps Pipeline VoiceCraft (19 étapes)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
