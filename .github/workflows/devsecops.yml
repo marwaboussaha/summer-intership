@@ -1,252 +1,213 @@
-##############################################################################
-# devsecops.yml
-# Pipeline DevSecOps (GitLab CI/CD)
-#
-# Ordre : Gitleaks -> Install Dependencies -> SAST (SonarQube) -> Quality Gate
-#         -> SCA (Snyk) -> Build (front/back/db) -> Trivy -> Tag & Push
-#         -> Deploy -> DAST (OWASP ZAP)
-##############################################################################
+name: DevSecOps Pipeline
 
-stages:
-  - secret-scan
-  - install
-  - sast
-  - quality-gate
-  - dependency-scan
-  - build
-  - image-scan
-  - push
-  - deploy
-  - dast
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
 
-variables:
-  REGISTRY: "registry.gitlab.com/${CI_PROJECT_PATH}"
-  IMAGE_TAG: "${CI_COMMIT_SHORT_SHA}"
-  SONAR_HOST_URL: "https://sonarqube.example.com"
-  STAGING_URL: "https://staging.monapp.com"
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  STAGING_URL: https://staging.monapp.com
 
-##############################################################################
-# 1. SECRET SCANNING - Gitleaks
-##############################################################################
-gitleaks:
-  stage: secret-scan
-  image: zricethezav/gitleaks:latest
-  script:
-    - echo "Scan des secrets avec Gitleaks..."
-    - gitleaks detect --source . --verbose --redact --exit-code 1
-  rules:
-    - if: '$CI_PIPELINE_SOURCE == "merge_request_event" || $CI_COMMIT_BRANCH'
-  allow_failure: false   # FAIL -> STOP
+jobs:
+  ##########################################################################
+  # 1. SECRET SCANNING - Gitleaks
+  ##########################################################################
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan des secrets avec Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-##############################################################################
-# 2. INSTALL DEPENDENCIES
-##############################################################################
-install-dependencies:
-  stage: install
-  image: node:18-alpine
-  script:
-    - echo "Installation des dépendances Front..."
-    - cd frontend && npm ci && cd ..
-    - echo "Installation des dépendances Back..."
-    - cd backend && npm ci && cd ..
-  artifacts:
-    paths:
-      - frontend/node_modules
-      - backend/node_modules
-    expire_in: 1 hour
-  allow_failure: false   # FAIL -> STOP
+  ##########################################################################
+  # 2. INSTALL DEPENDENCIES
+  ##########################################################################
+  install-dependencies:
+    runs-on: ubuntu-latest
+    needs: gitleaks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Installer dépendances Frontend
+        run: cd frontend && npm ci
+      - name: Installer dépendances Backend
+        run: cd backend && npm ci
+      - name: Sauvegarder node_modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-modules
+          path: |
+            frontend/node_modules
+            backend/node_modules
+          retention-days: 1
 
-##############################################################################
-# 3. SAST - SonarQube
-##############################################################################
-sast-sonarqube:
-  stage: sast
-  image: sonarsource/sonar-scanner-cli:latest
-  needs: ["install-dependencies"]
-  script:
-    - echo "Analyse statique du code avec SonarQube..."
-    - sonar-scanner
-      -Dsonar.projectKey=${CI_PROJECT_NAME}
-      -Dsonar.sources=.
-      -Dsonar.host.url=${SONAR_HOST_URL}
-      -Dsonar.login=${SONAR_TOKEN}
-  allow_failure: false
+  ##########################################################################
+  # 3. SAST - SonarQube
+  ##########################################################################
+  sast-sonarqube:
+    runs-on: ubuntu-latest
+    needs: install-dependencies
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-##############################################################################
-# 4. SAST QUALITY GATE - vérification du statut SonarQube
-##############################################################################
-sast-quality-gate:
-  stage: quality-gate
-  image: curlimages/curl:latest
-  needs: ["sast-sonarqube"]
-  script:
-    - echo "Vérification de la Quality Gate SonarQube..."
-    - |
-      STATUS=$(curl -s -u ${SONAR_TOKEN}: \
-        "${SONAR_HOST_URL}/api/qualitygates/project_status?projectKey=${CI_PROJECT_NAME}" \
-        | grep -o '"status":"[A-Z]*"' | head -1 | cut -d'"' -f4)
-      echo "Quality Gate status: $STATUS"
-      if [ "$STATUS" != "OK" ]; then
-        echo "❌ Quality Gate échouée (Critical/High vulnerabilities ou seuils non atteints)"
-        exit 1
-      fi
-      echo "✅ Quality Gate passée"
-  allow_failure: false   # Gate Failed -> STOP
+  ##########################################################################
+  # 4. SAST QUALITY GATE
+  ##########################################################################
+  sast-quality-gate:
+    runs-on: ubuntu-latest
+    needs: sast-sonarqube
+    steps:
+      - name: Vérifier la Quality Gate SonarQube
+        uses: sonarsource/sonarqube-quality-gate-action@master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
-##############################################################################
-# 5. SCA - Snyk (Dependency Scan)
-##############################################################################
-dependency-scan-snyk:
-  stage: dependency-scan
-  image: snyk/snyk:node
-  needs: ["install-dependencies", "sast-quality-gate"]
-  script:
-    - echo "Scan des dépendances avec Snyk..."
-    - snyk auth ${SNYK_TOKEN}
-    - snyk test --severity-threshold=high --all-projects
-  allow_failure: false   # Critical/High -> STOP (Medium/Low géré par --severity-threshold)
+  ##########################################################################
+  # 5. SCA - Snyk (Dependency Scan)
+  ##########################################################################
+  dependency-scan-snyk:
+    runs-on: ubuntu-latest
+    needs: sast-quality-gate
+    steps:
+      - uses: actions/checkout@v4
+      - name: Snyk - Scan des dépendances
+        uses: snyk/actions/node@master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
 
-##############################################################################
-# 6. BUILD - Images Front / Back / Database
-##############################################################################
-build-frontend:
-  stage: build
-  image: docker:24
-  services: [docker:24-dind]
-  needs: ["dependency-scan-snyk"]
-  script:
-    - docker build -t ${REGISTRY}/frontend:${IMAGE_TAG} ./frontend
-    - docker save ${REGISTRY}/frontend:${IMAGE_TAG} -o frontend-image.tar
-  artifacts:
-    paths: [frontend-image.tar]
-    expire_in: 1 hour
-  allow_failure: false
+  ##########################################################################
+  # 6. BUILD - Images Front / Back / Database
+  ##########################################################################
+  build-images:
+    runs-on: ubuntu-latest
+    needs: dependency-scan-snyk
+    strategy:
+      matrix:
+        service: [frontend, backend, database]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image ${{ matrix.service }}
+        run: |
+          docker build -t ${{ matrix.service }}:${{ github.sha }} ./${{ matrix.service }}
+          docker save ${{ matrix.service }}:${{ github.sha }} -o ${{ matrix.service }}-image.tar
+      - name: Sauvegarder l'image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-image
+          path: ${{ matrix.service }}-image.tar
+          retention-days: 1
 
-build-backend:
-  stage: build
-  image: docker:24
-  services: [docker:24-dind]
-  needs: ["dependency-scan-snyk"]
-  script:
-    - docker build -t ${REGISTRY}/backend:${IMAGE_TAG} ./backend
-    - docker save ${REGISTRY}/backend:${IMAGE_TAG} -o backend-image.tar
-  artifacts:
-    paths: [backend-image.tar]
-    expire_in: 1 hour
-  allow_failure: false
+  ##########################################################################
+  # 7. IMAGE SCAN - Trivy
+  ##########################################################################
+  scan-images:
+    runs-on: ubuntu-latest
+    needs: build-images
+    strategy:
+      matrix:
+        service: [frontend, backend, database]
+    steps:
+      - name: Télécharger l'image
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.service }}-image
+      - name: Charger l'image Docker
+        run: docker load -i ${{ matrix.service }}-image.tar
+      - name: Scan Trivy (Critical/High = bloquant)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ matrix.service }}:${{ github.sha }}"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+      - name: Scan Trivy (Medium/Low = informatif)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ matrix.service }}:${{ github.sha }}"
+          severity: "MEDIUM,LOW"
+          exit-code: "0"
 
-build-database:
-  stage: build
-  image: docker:24
-  services: [docker:24-dind]
-  needs: ["dependency-scan-snyk"]
-  script:
-    - docker build -t ${REGISTRY}/database:${IMAGE_TAG} ./database
-    - docker save ${REGISTRY}/database:${IMAGE_TAG} -o database-image.tar
-  artifacts:
-    paths: [database-image.tar]
-    expire_in: 1 hour
-  allow_failure: false
+  ##########################################################################
+  # 8. TAG & PUSH - Registry (GitHub Container Registry)
+  ##########################################################################
+  tag-and-push:
+    runs-on: ubuntu-latest
+    needs: scan-images
+    strategy:
+      matrix:
+        service: [frontend, backend, database]
+    steps:
+      - name: Télécharger l'image
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.service }}-image
+      - name: Charger l'image
+        run: docker load -i ${{ matrix.service }}-image.tar
+      - name: Login au registre
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag & Push
+        run: |
+          docker tag ${{ matrix.service }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:${{ github.sha }}
+          docker tag ${{ matrix.service }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:latest
 
-##############################################################################
-# 7. IMAGE SCAN - Trivy (Vulnerability Scan)
-##############################################################################
-.trivy-template: &trivy-scan
-  stage: image-scan
-  image: aquasec/trivy:latest
-  script:
-    - docker load -i ${IMAGE_FILE}
-    - echo "Scan Trivy de l'image ${IMAGE_NAME}..."
-    - trivy image
-      --severity CRITICAL,HIGH
-      --exit-code 1
-      --no-progress
-      ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
-    - trivy image
-      --severity MEDIUM,LOW
-      --exit-code 0
-      --no-progress
-      ${REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
-  allow_failure: false   # Critical/High -> STOP
+  ##########################################################################
+  # 9. DEPLOY - Staging
+  ##########################################################################
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: tag-and-push
+    environment: staging
+    steps:
+      - name: Configurer kubectl
+        uses: azure/setup-kubectl@v4
+      - name: Déployer sur staging
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig.yaml
+          export KUBECONFIG=kubeconfig.yaml
+          kubectl set image deployment/frontend frontend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }} -n staging
+          kubectl set image deployment/backend backend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} -n staging
+          kubectl rollout status deployment/frontend -n staging
+          kubectl rollout status deployment/backend -n staging
 
-scan-frontend-image:
-  <<: *trivy-scan
-  needs: ["build-frontend"]
-  variables:
-    IMAGE_FILE: frontend-image.tar
-    IMAGE_NAME: frontend
-
-scan-backend-image:
-  <<: *trivy-scan
-  needs: ["build-backend"]
-  variables:
-    IMAGE_FILE: backend-image.tar
-    IMAGE_NAME: backend
-
-scan-database-image:
-  <<: *trivy-scan
-  needs: ["build-database"]
-  variables:
-    IMAGE_FILE: database-image.tar
-    IMAGE_NAME: database
-
-##############################################################################
-# 8. TAG & PUSH - Registry
-##############################################################################
-tag-and-push:
-  stage: push
-  image: docker:24
-  services: [docker:24-dind]
-  needs:
-    - scan-frontend-image
-    - scan-backend-image
-    - scan-database-image
-  script:
-    - echo "${CI_REGISTRY_PASSWORD}" | docker login -u "${CI_REGISTRY_USER}" --password-stdin ${REGISTRY}
-    - for svc in frontend backend database; do
-        docker load -i ${svc}-image.tar;
-        docker tag ${REGISTRY}/${svc}:${IMAGE_TAG} ${REGISTRY}/${svc}:latest;
-        docker push ${REGISTRY}/${svc}:${IMAGE_TAG};
-        docker push ${REGISTRY}/${svc}:latest;
-      done
-  allow_failure: false
-
-##############################################################################
-# 9. DEPLOY - Staging
-##############################################################################
-deploy-staging:
-  stage: deploy
-  image: bitnami/kubectl:latest
-  needs: ["tag-and-push"]
-  script:
-    - echo "Déploiement sur l'environnement de staging..."
-    - kubectl set image deployment/frontend frontend=${REGISTRY}/frontend:${IMAGE_TAG} -n staging
-    - kubectl set image deployment/backend backend=${REGISTRY}/backend:${IMAGE_TAG} -n staging
-    - kubectl set image deployment/database database=${REGISTRY}/database:${IMAGE_TAG} -n staging
-    - kubectl rollout status deployment/frontend -n staging
-    - kubectl rollout status deployment/backend -n staging
-  allow_failure: false   # FAIL -> STOP
-
-##############################################################################
-# 10. DAST - OWASP ZAP
-##############################################################################
-dast-owasp-zap:
-  stage: dast
-  image: ghcr.io/zaproxy/zaproxy:stable
-  needs: ["deploy-staging"]
-  script:
-    - echo "Scan dynamique (DAST) avec OWASP ZAP sur ${STAGING_URL}..."
-    - zap-baseline.py
-      -t ${STAGING_URL}
-      -r zap-report.html
-      -l HIGH
-      -I
-  artifacts:
-    paths: [zap-report.html]
-    when: always
-  allow_failure: false   # Critical/High -> STOP / Rollback
-
-##############################################################################
-# Fin du pipeline : si toutes les étapes passent -> déploiement production
-# (à ajouter séparément avec approbation manuelle, ex: "when: manual")
-##############################################################################
+  ##########################################################################
+  # 10. DAST - OWASP ZAP
+  ##########################################################################
+  dast-owasp-zap:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ env.STAGING_URL }}
+          rules_file_name: ".zap/rules.tsv"
+          cmd_options: "-l HIGH"
+      - name: Sauvegarder le rapport ZAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
