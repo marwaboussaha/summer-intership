@@ -33,11 +33,10 @@ router.get("/export-pdf", async (req, res) => {
     });
 
     const page = await browser.newPage();
-    // nosemgrep: javascript.express.security.express-puppeteer-injection.express-puppeteer-injection
     // Justification : "url" est déjà validé ci-dessus (isValidSandboxUrl) —
     // restreint à http://localhost:4000-4100, la plage exacte des sandboxes
     // Docker internes. Aucune donnée utilisateur libre n'atteint page.goto().
-    await page.goto(url, { waitUntil: "networkidle0", timeout: 15000 });
+    await page.goto(url, { waitUntil: "networkidle0", timeout: 15000 }); // nosemgrep: javascript.express.security.express-puppeteer-injection.express-puppeteer-injection
 
     const pdfBuffer = await page.pdf({
       format: "A4",
