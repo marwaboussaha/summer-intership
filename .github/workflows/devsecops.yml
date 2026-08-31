@@ -3,9 +3,6 @@ name: DevSecOps Pipeline VoiceCraft (19 étapes)
 on:
   push:
     branches: [main]
-<<<<<<< HEAD
-  workflow_dispatch:
-=======
   workflow_dispatch:
 
 env:
@@ -366,4 +363,3 @@ jobs:
       #     curl -X POST -H 'Content-type: application/json' \
       #       --data '{"text":"🚨 Incident VoiceCraft en production"}' \
       #       ${{ secrets.SLACK_WEBHOOK_URL }}
->>>>>>> cd33f2ac97abcba99f9f9695c25c289057499ae1
