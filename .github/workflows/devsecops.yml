@@ -51,7 +51,7 @@ jobs:
           retention-days: 1
 
   ##########################################################################
-  # 3. SAST - SonarQube
+  # 3a. SAST - SonarQube (en parallèle de la SCA)
   ##########################################################################
   sast-sonarqube:
     runs-on: ubuntu-latest
@@ -67,7 +67,7 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
   ##########################################################################
-  # 4. SAST QUALITY GATE
+  # 3b. SAST QUALITY GATE
   ##########################################################################
   sast-quality-gate:
     runs-on: ubuntu-latest
@@ -80,11 +80,11 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
   ##########################################################################
-  # 5. SCA - Snyk (Dependency Scan)
+  # 4. SCA - Snyk (Dependency Scan) — en parallèle du SAST
   ##########################################################################
   dependency-scan-snyk:
     runs-on: ubuntu-latest
-    needs: sast-quality-gate
+    needs: install-dependencies
     steps:
       - uses: actions/checkout@v4
       - name: Snyk - Scan des dépendances
@@ -95,11 +95,11 @@ jobs:
           args: --severity-threshold=high --all-projects
 
   ##########################################################################
-  # 6. BUILD - Images Front / Back / Database
+  # 5. BUILD - Images Front / Back / Database
   ##########################################################################
   build-images:
     runs-on: ubuntu-latest
-    needs: dependency-scan-snyk
+    needs: [sast-quality-gate, dependency-scan-snyk]
     strategy:
       matrix:
         service: [frontend, backend, database]
@@ -117,7 +117,7 @@ jobs:
           retention-days: 1
 
   ##########################################################################
-  # 7. IMAGE SCAN - Trivy
+  # 6. IMAGE SCAN - Trivy
   ##########################################################################
   scan-images:
     runs-on: ubuntu-latest
@@ -146,7 +146,7 @@ jobs:
           exit-code: "0"
 
   ##########################################################################
-  # 8. TAG & PUSH - Registry (GitHub Container Registry)
+  # 7. TAG & PUSH - Registry (GitHub Container Registry)
   ##########################################################################
   tag-and-push:
     runs-on: ubuntu-latest
@@ -175,7 +175,7 @@ jobs:
           docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:latest
 
   ##########################################################################
-  # 9. DEPLOY - Staging
+  # 8. DEPLOY - Staging
   ##########################################################################
   deploy-staging:
     runs-on: ubuntu-latest
@@ -194,7 +194,7 @@ jobs:
           kubectl rollout status deployment/backend -n staging
 
   ##########################################################################
-  # 10. DAST - OWASP ZAP
+  # 9. DAST - OWASP ZAP
   ##########################################################################
   dast-owasp-zap:
     runs-on: ubuntu-latest
