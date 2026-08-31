@@ -1,6 +1,5 @@
 import express from "express";
 import puppeteer from "puppeteer";
-import fs from "fs";
 
 const router = express.Router();
 
@@ -12,7 +11,17 @@ router.get("/export-pdf", async (req, res) => {
     return res.status(400).json({ error: "Paramètre 'url' manquant" });
   }
 
-  if (!/^http:\/\/localhost:\d+/.test(url)) {
+  // ⭐ Correction sécurité (détectée par Semgrep en CI — SSRF) :
+  // on ne vérifiait auparavant que le préfixe "http://localhost:", ce qui
+  // aurait permis à un attaquant de cibler N'IMPORTE QUEL port du serveur
+  // (ex: le port SSH, MongoDB...). On restreint désormais précisément à la
+  // plage de ports réellement utilisée par les sandboxes Docker (4000-4100),
+  // définie dans dockerRunner.js.
+  const urlMatch = /^http:\/\/localhost:(\d+)(\/.*)?$/.exec(url);
+  const port = urlMatch ? parseInt(urlMatch[1], 10) : null;
+  const isValidSandboxUrl = port !== null && port >= 4000 && port <= 4100;
+
+  if (!isValidSandboxUrl) {
     return res.status(400).json({ error: "URL non autorisée pour l'export" });
   }
 
@@ -24,6 +33,10 @@ router.get("/export-pdf", async (req, res) => {
     });
 
     const page = await browser.newPage();
+    // nosemgrep: javascript.express.security.express-puppeteer-injection.express-puppeteer-injection
+    // Justification : "url" est déjà validé ci-dessus (isValidSandboxUrl) —
+    // restreint à http://localhost:4000-4100, la plage exacte des sandboxes
+    // Docker internes. Aucune donnée utilisateur libre n'atteint page.goto().
     await page.goto(url, { waitUntil: "networkidle0", timeout: 15000 });
 
     const pdfBuffer = await page.pdf({
@@ -31,15 +44,6 @@ router.get("/export-pdf", async (req, res) => {
       printBackground: true,
       margin: { top: "10mm", bottom: "10mm", left: "10mm", right: "10mm" }
     });
-
-    // ⭐ DIAGNOSTIC : sauvegarde une copie directement sur le serveur,
-    // AVANT tout envoi HTTP. Si ce fichier s'ouvre correctement, le
-    // problème vient de la transmission réseau. S'il est déjà corrompu
-    // ici, le problème vient de Puppeteer/de la page capturée elle-même.
-    fs.writeFileSync("debug-export.pdf", pdfBuffer);
-    console.log(
-      `📄 DEBUG : PDF sauvegardé côté serveur (${pdfBuffer.length} octets) dans backend/debug-export.pdf`
-    );
 
     res.set({
       "Content-Type": "application/pdf",
