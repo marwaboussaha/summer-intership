@@ -15,6 +15,9 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.3.1",
-    "vite": "^5.4.1"
+    "vite": "^8.2.2"
+  },
+  "overrides": {
+    "nanoid": "^5.0.9"
   }
 }
