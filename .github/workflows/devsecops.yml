@@ -129,10 +129,14 @@ jobs:
       # message d'erreur renvoyé par le serveur (bien plus parlant qu'un
       # simple code retour). A retirer une fois le problème identifié.
       - name: "Debug - tester l'accès direct à l'API Sonar"
+        # Auth via header Authorization plutôt que "curl -u token:" :
+        # ce dernier pattern déclenche un faux positif sur la règle
+        # gitleaks "curl-auth-user" (elle matche la syntaxe -u user:pass
+        # même quand la valeur est une variable d'env, pas un secret en clair).
         run: |
           SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
           echo "Serveur détecté : $SERVER_URL"
-          curl -v -u "${{ secrets.SONAR_TOKEN }}:" "$SERVER_URL/api/system/status"
+          curl -v -H "Authorization: Bearer ${SONAR_TOKEN}" "$SERVER_URL/api/system/status"
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
