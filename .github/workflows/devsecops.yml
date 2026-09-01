@@ -119,6 +119,23 @@ jobs:
             exit 1
           fi
 
+      # /!\ STEP DE DEBUG TEMPORAIRE /!\
+      # Le job plantait avec "curl: (22) ... 403" à l'appel de l'API Sonar
+      # (/api/ce/task) fait en interne par sonarqube-quality-gate-action.
+      # Un 403 veut dire que le serveur répond mais refuse l'accès :
+      # soit un pare-feu/WAF bloque l'IP du runner GitHub, soit le token
+      # SONAR_TOKEN n'a pas les droits "Browse" sur le projet.
+      # Ce step appelle directement l'API avec -v pour voir le vrai
+      # message d'erreur renvoyé par le serveur (bien plus parlant qu'un
+      # simple code retour). A retirer une fois le problème identifié.
+      - name: "Debug - tester l'accès direct à l'API Sonar"
+        run: |
+          SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
+          echo "Serveur détecté : $SERVER_URL"
+          curl -v -u "${{ secrets.SONAR_TOKEN }}:" "$SERVER_URL/api/system/status"
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
       - name: Vérifier la Quality Gate SonarQube
         uses: sonarsource/sonarqube-quality-gate-action@master
         timeout-minutes: 5
@@ -133,7 +150,7 @@ jobs:
     needs: sast-quality-gate
     steps:
       - uses: actions/checkout@v4
-      - name: Snyk - Scan des dépendances
+      - name: "Sca: Snyk - Scan des dépendances"
         uses: snyk/actions/node@master
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
