@@ -144,6 +144,7 @@ jobs:
           echo "URL appelée : $CE_TASK_URL"
           BASIC_AUTH=$(printf '%s:' "${SONAR_TOKEN}" | base64 -w 0)
           curl -s -H "Authorization: Basic ${BASIC_AUTH}" "$CE_TASK_URL" | tee ce_task_response.json
+          echo ""
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
@@ -153,6 +154,9 @@ jobs:
       # /api/qualitygates/project_status?analysisId=... avec l'analysisId
       # renvoyé par le premier appel. C'est ce DEUXIÈME appel qui n'a
       # jamais été testé isolément - c'est probablement lui qui répond 403.
+      # Pas de -v ici : la sortie verbeuse TLS est trop longue et se fait
+      # tronquer par l'UI de logs GitHub avant d'afficher la vraie réponse.
+      # On isole juste le code HTTP + le corps JSON, l'essentiel.
       - name: "Debug - tester /api/qualitygates/project_status"
         run: |
           SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
@@ -161,19 +165,11 @@ jobs:
           QG_URL="${SERVER_URL}/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}"
           echo "URL appelée : $QG_URL"
           BASIC_AUTH=$(printf '%s:' "${SONAR_TOKEN}" | base64 -w 0)
-          curl -v -H "Authorization: Basic ${BASIC_AUTH}" "$QG_URL"
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      - name: "Debug - tester l'accès direct à l'API Sonar"
-        # Auth via header Authorization plutôt que "curl -u token:" :
-        # ce dernier pattern déclenche un faux positif sur la règle
-        # gitleaks "curl-auth-user" (elle matche la syntaxe -u user:pass
-        # même quand la valeur est une variable d'env, pas un secret en clair).
-        run: |
-          SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
-          echo "Serveur détecté : $SERVER_URL"
-          curl -v -H "Authorization: Bearer ${SONAR_TOKEN}" "$SERVER_URL/api/system/status"
+          HTTP_CODE=$(curl -s -o response_body.json -w "%{http_code}" -H "Authorization: Basic ${BASIC_AUTH}" "$QG_URL")
+          echo "=== CODE HTTP : $HTTP_CODE ==="
+          echo "=== CORPS DE LA REPONSE ==="
+          cat response_body.json
+          echo ""
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
