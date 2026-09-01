@@ -143,7 +143,25 @@ jobs:
           CE_TASK_URL="${SERVER_URL}/api/ce/task?id=${CE_TASK_ID}"
           echo "URL appelée : $CE_TASK_URL"
           BASIC_AUTH=$(printf '%s:' "${SONAR_TOKEN}" | base64 -w 0)
-          curl -v -H "Authorization: Basic ${BASIC_AUTH}" "$CE_TASK_URL"
+          curl -s -H "Authorization: Basic ${BASIC_AUTH}" "$CE_TASK_URL" | tee ce_task_response.json
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+      # /!\ CE STEP CIBLE LE VRAI COUPABLE /!\
+      # check-quality-gate.sh fait DEUX appels : d'abord /api/ce/task
+      # (qu'on vient de prouver fonctionnel, 200 + status SUCCESS), PUIS
+      # /api/qualitygates/project_status?analysisId=... avec l'analysisId
+      # renvoyé par le premier appel. C'est ce DEUXIÈME appel qui n'a
+      # jamais été testé isolément - c'est probablement lui qui répond 403.
+      - name: "Debug - tester /api/qualitygates/project_status"
+        run: |
+          SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
+          ANALYSIS_ID=$(jq -r '.task.analysisId' ce_task_response.json)
+          echo "analysisId extrait : $ANALYSIS_ID"
+          QG_URL="${SERVER_URL}/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}"
+          echo "URL appelée : $QG_URL"
+          BASIC_AUTH=$(printf '%s:' "${SONAR_TOKEN}" | base64 -w 0)
+          curl -v -H "Authorization: Basic ${BASIC_AUTH}" "$QG_URL"
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
