@@ -128,6 +128,25 @@ jobs:
       # Ce step appelle directement l'API avec -v pour voir le vrai
       # message d'erreur renvoyé par le serveur (bien plus parlant qu'un
       # simple code retour). A retirer une fois le problème identifié.
+      - name: "Debug - reproduire l'appel exact de check-quality-gate.sh"
+        # /api/system/status est public, donc le 1er test ne prouvait rien
+        # sur la validité du token. Ici on reproduit EXACTEMENT ce que fait
+        # check-quality-gate.sh en interne : même URL (ceTaskUrl, extraite
+        # du vrai report-task.txt), même méthode d'auth (Basic Auth avec
+        # le token comme "username", mot de passe vide).
+        # On construit le header Basic à la main (au lieu de curl --user
+        # "$TOKEN":) pour éviter le même faux positif gitleaks que la fois
+        # précédente (règle curl-auth-user, sensible au pattern -u/--user).
+        run: |
+          SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
+          CE_TASK_ID=$(grep ceTaskId .scannerwork/report-task.txt | cut -d'=' -f2-)
+          CE_TASK_URL="${SERVER_URL}/api/ce/task?id=${CE_TASK_ID}"
+          echo "URL appelée : $CE_TASK_URL"
+          BASIC_AUTH=$(printf '%s:' "${SONAR_TOKEN}" | base64 -w 0)
+          curl -v -H "Authorization: Basic ${BASIC_AUTH}" "$CE_TASK_URL"
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
       - name: "Debug - tester l'accès direct à l'API Sonar"
         # Auth via header Authorization plutôt que "curl -u token:" :
         # ce dernier pattern déclenche un faux positif sur la règle
