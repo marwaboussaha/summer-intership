@@ -1,0 +1,10 @@
+﻿.env
+.env.*
+node_modules
+sandboxes
+sandbox
+*.pdf
+test-*.js
+test-*.json
+debug-*.pdf
+.git
