@@ -339,7 +339,353 @@ jobs:
         with:
           target: ${{ env.STAGING_URL }}
           rules_file_name: ".zap/rules.tsv"
+          cmd_options: "-l HIGH"name: DevSecOps Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  STAGING_URL: https://staging.monapp.com
+
+jobs:
+  ##########################################################################
+  # 1. SECRET SCANNING - Gitleaks
+  ##########################################################################
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan des secrets avec Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  ##########################################################################
+  # 2. INSTALL DEPENDENCIES
+  ##########################################################################
+  install-dependencies:
+    runs-on: ubuntu-latest
+    needs: gitleaks
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 18
+      - name: Installer dépendances Frontend
+        run: cd frontend && npm ci
+      - name: Installer dépendances Backend
+        run: cd backend && npm ci
+      - name: Sauvegarder node_modules
+        uses: actions/upload-artifact@v4
+        with:
+          name: node-modules
+          path: |
+            frontend/node_modules
+            backend/node_modules
+          retention-days: 1
+
+  ##########################################################################
+  # 3. SAST - SonarQube
+  ##########################################################################
+  sast-sonarqube:
+    runs-on: ubuntu-latest
+    needs: install-dependencies
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@v3
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+
+      - name: Vérifier que le rapport Sonar existe
+        run: |
+          if [ ! -f .scannerwork/report-task.txt ]; then
+            echo "::error::.scannerwork/report-task.txt introuvable après le scan Sonar."
+            exit 1
+          fi
+          echo "Rapport trouvé :"
+          cat .scannerwork/report-task.txt
+
+      - name: Uploader le report SonarQube (report-task.txt)
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-report
+          path: .scannerwork/report-task.txt
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
+  ##########################################################################
+  # 4. SAST QUALITY GATE
+  ##########################################################################
+  sast-quality-gate:
+    runs-on: ubuntu-latest
+    needs: sast-sonarqube
+    steps:
+      - name: Télécharger le report SonarQube
+        uses: actions/download-artifact@v4
+        with:
+          name: sonar-report
+          path: .scannerwork
+
+      - name: Vérifier que le fichier est bien arrivé
+        run: |
+          if [ ! -f .scannerwork/report-task.txt ]; then
+            echo "::error::report-task.txt absent après téléchargement de l'artefact."
+            exit 1
+          fi
+
+      - name: Vérifier la Quality Gate SonarQube
+        uses: sonarsource/sonarqube-quality-gate-action@7a5fffe8e523c40e0c740b6bc2712ab503e52efa # master
+        timeout-minutes: 5
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+  ##########################################################################
+  # 5. SCA - Snyk (Dependency Scan)
+  ##########################################################################
+  dependency-scan-snyk:
+    runs-on: ubuntu-latest
+    needs: sast-quality-gate
+    steps:
+      - uses: actions/checkout@v4
+      - name: "Sca: Snyk - Scan des dépendances"
+        uses: snyk/actions/node@9cf6ca713d71123d2d229cc3d7f145b96ea3c518 # master
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high --all-projects
+
+  ##########################################################################
+  # 6. BUILD - Images Front / Back / Database
+  #
+  # CORRECTIF : "open Dockerfile: no such file or directory"
+  # -----------------------------------------------------------------------
+  # Cause : aucun fichier nommé exactement "Dockerfile" n'existait à la
+  # racine de ./frontend, ./backend ou ./database au moment du build.
+  #
+  # Ce job devient auto-réparateur :
+  #   - Si un Dockerfile existe déjà -> on l'utilise tel quel (rien ne change
+  #     pour vous si vous avez déjà vos propres Dockerfiles).
+  #   - S'il manque -> on en génère un par défaut, adapté à la stack décrite
+  #     dans le journal (Node/Express pour backend, Vite/React + nginx pour
+  #     frontend).
+  #   - Pour "database" : MongoDB n'a normalement pas besoin d'image custom.
+  #     Si aucun Dockerfile n'est trouvé, on utilise directement l'image
+  #     officielle mongo:7 (pull + tag), sans tenter de build.
+  ##########################################################################
+  build-images:
+    runs-on: ubuntu-latest
+    needs: dependency-scan-snyk
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [frontend, backend, database]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: "Diagnostic - lister le contenu de ./${{ matrix.service }}"
+        run: |
+          echo "Contenu de ./${{ matrix.service }} :"
+          ls -la ./${{ matrix.service }} || echo "Le dossier ./${{ matrix.service }} n'existe pas."
+
+      - name: "S'assurer qu'un Dockerfile existe (génère un défaut sinon)"
+        run: |
+          set -e
+          SERVICE="${{ matrix.service }}"
+          DIR="./${SERVICE}"
+          mkdir -p "$DIR"
+
+          if [ -f "$DIR/Dockerfile" ]; then
+            echo "Dockerfile déjà présent pour $SERVICE, on le garde tel quel."
+            exit 0
+          fi
+
+          echo "::warning::Aucun Dockerfile trouvé pour $SERVICE, génération d'un Dockerfile par défaut."
+
+          case "$SERVICE" in
+            frontend)
+              cat > "$DIR/Dockerfile" <<'EOF'
+          FROM node:18-alpine AS build
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci
+          COPY . .
+          RUN npm run build
+
+          FROM nginx:alpine
+          COPY --from=build /app/dist /usr/share/nginx/html
+          EXPOSE 80
+          EOF
+              ;;
+            backend)
+              cat > "$DIR/Dockerfile" <<'EOF'
+          FROM node:18-alpine
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci --omit=dev
+          COPY . .
+          RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+          USER appuser
+          EXPOSE 3000
+          CMD ["node", "server.js"]
+          EOF
+              ;;
+            database)
+              # Pas de Dockerfile custom nécessaire pour MongoDB standard :
+              # on gère ce cas séparément à l'étape suivante (pull direct).
+              echo "database: pas de génération de Dockerfile, image officielle utilisée."
+              ;;
+          esac
+
+      - name: "Build image ${{ matrix.service }} (ou pull si database sans Dockerfile)"
+        run: |
+          set -e
+          SERVICE="${{ matrix.service }}"
+          DIR="./${SERVICE}"
+
+          if [ "$SERVICE" = "database" ] && [ ! -f "$DIR/Dockerfile" ]; then
+            echo "Pull de l'image officielle mongo:7 pour database"
+            docker pull mongo:7
+            docker tag mongo:7 database:${{ github.sha }}
+          else
+            docker build -t ${SERVICE}:${{ github.sha }} "$DIR"
+          fi
+
+          docker save ${SERVICE}:${{ github.sha }} -o ${SERVICE}-image.tar
+
+      - name: Sauvegarder l'image
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-image
+          path: ${{ matrix.service }}-image.tar
+          retention-days: 1
+
+  ##########################################################################
+  # 7. IMAGE SCAN - Trivy
+  ##########################################################################
+  scan-images:
+    runs-on: ubuntu-latest
+    needs: build-images
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [frontend, backend, database]
+    steps:
+      - name: Télécharger l'image
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.service }}-image
+      - name: Charger l'image Docker
+        run: docker load -i ${{ matrix.service }}-image.tar
+
+      # Rapport complet, non filtré par l'affichage GitHub, à télécharger
+      - name: Scan Trivy - rapport complet (non bloquant, pour diagnostic)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "${{ matrix.service }}:${{ github.sha }}"
+          format: "table"
+          output: "trivy-report-${{ matrix.service }}.txt"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+
+      - name: Sauvegarder le rapport Trivy
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.service }}
+          path: trivy-report-${{ matrix.service }}.txt
+          retention-days: 5
+
+      - name: Scan Trivy (Critical/High = bloquant)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "${{ matrix.service }}:${{ github.sha }}"
+          severity: "CRITICAL,HIGH"
+          exit-code: "1"
+      - name: Scan Trivy (Medium/Low = informatif)
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "${{ matrix.service }}:${{ github.sha }}"
+          severity: "MEDIUM,LOW"
+          exit-code: "0"
+
+  ##########################################################################
+  # 8. TAG & PUSH - Registry (GitHub Container Registry)
+  ##########################################################################
+  tag-and-push:
+    runs-on: ubuntu-latest
+    needs: scan-images
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [frontend, backend, database]
+    steps:
+      - name: Télécharger l'image
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ matrix.service }}-image
+      - name: Charger l'image
+        run: docker load -i ${{ matrix.service }}-image.tar
+      - name: Login au registre
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tag & Push
+        run: |
+          docker tag ${{ matrix.service }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:${{ github.sha }}
+          docker tag ${{ matrix.service }}:${{ github.sha }} ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:latest
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:${{ github.sha }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}:latest
+
+  ##########################################################################
+  # 9. DEPLOY - Staging
+  ##########################################################################
+  deploy-staging:
+    runs-on: ubuntu-latest
+    needs: tag-and-push
+    environment: staging
+    steps:
+      - name: Configurer kubectl
+        uses: azure/setup-kubectl@v4
+      - name: Déployer sur staging
+        run: |
+          echo "${{ secrets.KUBE_CONFIG }}" > kubeconfig.yaml
+          export KUBECONFIG=kubeconfig.yaml
+          kubectl set image deployment/frontend frontend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/frontend:${{ github.sha }} -n staging
+          kubectl set image deployment/backend backend=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/backend:${{ github.sha }} -n staging
+          kubectl rollout status deployment/frontend -n staging
+          kubectl rollout status deployment/backend -n staging
+
+  ##########################################################################
+  # 10. DAST - OWASP ZAP
+  ##########################################################################
+  dast-owasp-zap:
+    runs-on: ubuntu-latest
+    needs: deploy-staging
+    steps:
+      - name: OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ env.STAGING_URL }}
+          rules_file_name: ".zap/rules.tsv"
           cmd_options: "-l HIGH"
+      - name: Sauvegarder le rapport ZAP
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-report
+          path: report_html.html
       - name: Sauvegarder le rapport ZAP
         uses: actions/upload-artifact@v4
         with:
