@@ -1,13 +1,14 @@
-FROM node:18-alpine
-RUN apk update && apk upgrade --no-cache
+FROM node:18-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev --ignore-scripts
-COPY server.js ./
-COPY routes ./routes
-COPY middleware ./middleware
-COPY services ./services
-COPY database ./database
+RUN npm ci --omit=dev
+COPY . .
+
+# Étape finale : le CLI npm n'est pas nécessaire pour exécuter l'app,
+# on ne copie que le résultat du build (élimine les CVEs du npm bundlé)
+FROM node:18-alpine
+WORKDIR /app
+COPY --from=build /app ./
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 USER appuser
 EXPOSE 3000
