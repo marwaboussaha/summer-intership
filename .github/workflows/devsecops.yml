@@ -233,7 +233,7 @@ jobs:
   ##########################################################################
   # 7. IMAGE SCAN - Trivy
   ##########################################################################
-   scan-images:
+  scan-images:
     runs-on: ubuntu-latest
     needs: build-images
     strategy:
