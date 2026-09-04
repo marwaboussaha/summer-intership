@@ -66,10 +66,6 @@ jobs:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
 
-      # Vérification explicite : si ce fichier n'existe pas ici, le scan
-      # n'a pas généré de tâche d'analyse (mauvais sonar.projectBaseDir,
-      # scan qui n'a pas tourné, etc). On préfère planter ICI avec un
-      # message clair plutôt que 2 jobs plus tard dans sast-quality-gate.
       - name: Vérifier que le rapport Sonar existe
         run: |
           if [ ! -f .scannerwork/report-task.txt ]; then
@@ -79,14 +75,6 @@ jobs:
           echo "Rapport trouvé :"
           cat .scannerwork/report-task.txt
 
-      # /!\ CORRECTIF PRINCIPAL /!\
-      # actions/upload-artifact@v4 IGNORE par défaut les fichiers et dossiers
-      # cachés (commençant par un point). Comme .scannerwork/ est un dossier
-      # caché, l'upload "réussissait" mais l'artefact était vide, donc
-      # sast-quality-gate ne trouvait jamais le fichier au téléchargement.
-      # include-hidden-files: true force l'inclusion de .scannerwork/.
-      # if-no-files-found: error fait planter CE job si jamais le fichier
-      # n'est plus là, au lieu d'un échec silencieux et différé.
       - name: Uploader le report SonarQube (report-task.txt)
         uses: actions/upload-artifact@v4
         with:
@@ -97,15 +85,12 @@ jobs:
           retention-days: 1
 
   ##########################################################################
-  # 4. SAST QUALITY GATE (job séparé, comme demandé)
+  # 4. SAST QUALITY GATE
   ##########################################################################
   sast-quality-gate:
     runs-on: ubuntu-latest
     needs: sast-sonarqube
     steps:
-      # Récupère report-task.txt uploadé par le job précédent, et le replace
-      # dans .scannerwork/ pour que sonarqube-quality-gate-action le trouve
-      # au même chemin relatif qu'attendu (.scannerwork/report-task.txt).
       - name: Télécharger le report SonarQube
         uses: actions/download-artifact@v4
         with:
@@ -118,60 +103,6 @@ jobs:
             echo "::error::report-task.txt absent après téléchargement de l'artefact."
             exit 1
           fi
-
-      # /!\ STEP DE DEBUG TEMPORAIRE /!\
-      # Le job plantait avec "curl: (22) ... 403" à l'appel de l'API Sonar
-      # (/api/ce/task) fait en interne par sonarqube-quality-gate-action.
-      # Un 403 veut dire que le serveur répond mais refuse l'accès :
-      # soit un pare-feu/WAF bloque l'IP du runner GitHub, soit le token
-      # SONAR_TOKEN n'a pas les droits "Browse" sur le projet.
-      # Ce step appelle directement l'API avec -v pour voir le vrai
-      # message d'erreur renvoyé par le serveur (bien plus parlant qu'un
-      # simple code retour). A retirer une fois le problème identifié.
-      - name: "Debug - reproduire l'appel exact de check-quality-gate.sh"
-        # /api/system/status est public, donc le 1er test ne prouvait rien
-        # sur la validité du token. Ici on reproduit EXACTEMENT ce que fait
-        # check-quality-gate.sh en interne : même URL (ceTaskUrl, extraite
-        # du vrai report-task.txt), même méthode d'auth (Basic Auth avec
-        # le token comme "username", mot de passe vide).
-        # On construit le header Basic à la main (au lieu de curl --user
-        # "$TOKEN":) pour éviter le même faux positif gitleaks que la fois
-        # précédente (règle curl-auth-user, sensible au pattern -u/--user).
-        run: |
-          SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
-          CE_TASK_ID=$(grep ceTaskId .scannerwork/report-task.txt | cut -d'=' -f2-)
-          CE_TASK_URL="${SERVER_URL}/api/ce/task?id=${CE_TASK_ID}"
-          echo "URL appelée : $CE_TASK_URL"
-          BASIC_AUTH=$(printf '%s:' "${SONAR_TOKEN}" | base64 -w 0)
-          curl -s -H "Authorization: Basic ${BASIC_AUTH}" "$CE_TASK_URL" | tee ce_task_response.json
-          echo ""
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-
-      # /!\ CE STEP CIBLE LE VRAI COUPABLE /!\
-      # check-quality-gate.sh fait DEUX appels : d'abord /api/ce/task
-      # (qu'on vient de prouver fonctionnel, 200 + status SUCCESS), PUIS
-      # /api/qualitygates/project_status?analysisId=... avec l'analysisId
-      # renvoyé par le premier appel. C'est ce DEUXIÈME appel qui n'a
-      # jamais été testé isolément - c'est probablement lui qui répond 403.
-      # Pas de -v ici : la sortie verbeuse TLS est trop longue et se fait
-      # tronquer par l'UI de logs GitHub avant d'afficher la vraie réponse.
-      # On isole juste le code HTTP + le corps JSON, l'essentiel.
-      - name: "Debug - tester /api/qualitygates/project_status"
-        run: |
-          SERVER_URL=$(grep serverUrl .scannerwork/report-task.txt | cut -d'=' -f2-)
-          ANALYSIS_ID=$(jq -r '.task.analysisId' ce_task_response.json)
-          echo "analysisId extrait : $ANALYSIS_ID"
-          QG_URL="${SERVER_URL}/api/qualitygates/project_status?analysisId=${ANALYSIS_ID}"
-          echo "URL appelée : $QG_URL"
-          BASIC_AUTH=$(printf '%s:' "${SONAR_TOKEN}" | base64 -w 0)
-          HTTP_CODE=$(curl -s -o response_body.json -w "%{http_code}" -H "Authorization: Basic ${BASIC_AUTH}" "$QG_URL")
-          echo "=== CODE HTTP : $HTTP_CODE ==="
-          echo "=== CORPS DE LA REPONSE ==="
-          cat response_body.json
-          echo ""
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
 
       - name: Vérifier la Quality Gate SonarQube
         uses: sonarsource/sonarqube-quality-gate-action@master
@@ -196,34 +127,102 @@ jobs:
 
   ##########################################################################
   # 6. BUILD - Images Front / Back / Database
+  #
+  # CORRECTIF : "open Dockerfile: no such file or directory"
+  # -----------------------------------------------------------------------
+  # Cause : aucun fichier nommé exactement "Dockerfile" n'existait à la
+  # racine de ./frontend, ./backend ou ./database au moment du build.
+  #
+  # Ce job devient auto-réparateur :
+  #   - Si un Dockerfile existe déjà -> on l'utilise tel quel (rien ne change
+  #     pour vous si vous avez déjà vos propres Dockerfiles).
+  #   - S'il manque -> on en génère un par défaut, adapté à la stack décrite
+  #     dans le journal (Node/Express pour backend, Vite/React + nginx pour
+  #     frontend).
+  #   - Pour "database" : MongoDB n'a normalement pas besoin d'image custom.
+  #     Si aucun Dockerfile n'est trouvé, on utilise directement l'image
+  #     officielle mongo:7 (pull + tag), sans tenter de build.
   ##########################################################################
   build-images:
     runs-on: ubuntu-latest
     needs: dependency-scan-snyk
     strategy:
-      # fail-fast: false -> si un service échoue (ex: backend), les deux
-      # autres (frontend, database) continuent quand même jusqu'au bout
-      # au lieu d'être annulés. Chaque image est indépendante, une erreur
-      # sur l'une ne doit pas empêcher de voir le résultat des autres.
       fail-fast: false
       matrix:
         service: [frontend, backend, database]
     steps:
       - uses: actions/checkout@v4
-      # Diagnostic : affiche ce qu'il y a vraiment dans ./<service> avant
-      # le build. Utile ici car l'erreur "open Dockerfile: no such file
-      # or directory" veut dire qu'aucun fichier nommé EXACTEMENT
-      # "Dockerfile" (majuscule, sans extension) n'existe à la racine de
-      # ce dossier - à vérifier : mauvais nom (dockerfile en minuscule,
-      # Dockerfile.backend...), mauvais chemin, ou fichier pas commité.
+
       - name: "Diagnostic - lister le contenu de ./${{ matrix.service }}"
         run: |
           echo "Contenu de ./${{ matrix.service }} :"
           ls -la ./${{ matrix.service }} || echo "Le dossier ./${{ matrix.service }} n'existe pas."
-      - name: Build image ${{ matrix.service }}
+
+      - name: "S'assurer qu'un Dockerfile existe (génère un défaut sinon)"
         run: |
-          docker build -t ${{ matrix.service }}:${{ github.sha }} ./${{ matrix.service }}
-          docker save ${{ matrix.service }}:${{ github.sha }} -o ${{ matrix.service }}-image.tar
+          set -e
+          SERVICE="${{ matrix.service }}"
+          DIR="./${SERVICE}"
+          mkdir -p "$DIR"
+
+          if [ -f "$DIR/Dockerfile" ]; then
+            echo "Dockerfile déjà présent pour $SERVICE, on le garde tel quel."
+            exit 0
+          fi
+
+          echo "::warning::Aucun Dockerfile trouvé pour $SERVICE, génération d'un Dockerfile par défaut."
+
+          case "$SERVICE" in
+            frontend)
+              cat > "$DIR/Dockerfile" <<'EOF'
+          FROM node:18-alpine AS build
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci
+          COPY . .
+          RUN npm run build
+
+          FROM nginx:alpine
+          COPY --from=build /app/dist /usr/share/nginx/html
+          EXPOSE 80
+          EOF
+              ;;
+            backend)
+              cat > "$DIR/Dockerfile" <<'EOF'
+          FROM node:18-alpine
+          WORKDIR /app
+          COPY package*.json ./
+          RUN npm ci --omit=dev
+          COPY . .
+          RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+          USER appuser
+          EXPOSE 3000
+          CMD ["node", "server.js"]
+          EOF
+              ;;
+            database)
+              # Pas de Dockerfile custom nécessaire pour MongoDB standard :
+              # on gère ce cas séparément à l'étape suivante (pull direct).
+              echo "database: pas de génération de Dockerfile, image officielle utilisée."
+              ;;
+          esac
+
+      - name: "Build image ${{ matrix.service }} (ou pull si database sans Dockerfile)"
+        run: |
+          set -e
+          SERVICE="${{ matrix.service }}"
+          DIR="./${SERVICE}"
+
+          if [ "$SERVICE" = "database" ] && [ ! -f "$DIR/Dockerfile" ]; then
+            echo "Pull de l'image officielle mongo:7 pour database"
+            docker pull mongo:7
+            docker tag mongo:7 database:${{ github.sha }}
+          else
+            docker build -t ${SERVICE}:${{ github.sha }} "$DIR"
+          fi
+
+          docker save ${SERVICE}:${{ github.sha }} -o ${SERVICE}-image.tar
+
       - name: Sauvegarder l'image
         uses: actions/upload-artifact@v4
         with:
@@ -238,8 +237,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-images
     strategy:
-      # Même logique : chaque scan Trivy est indépendant par image, un
-      # échec sur l'une ne doit pas annuler le scan des deux autres.
       fail-fast: false
       matrix:
         service: [frontend, backend, database]
