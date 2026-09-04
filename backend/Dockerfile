@@ -1,7 +1,7 @@
 FROM node:18-alpine AS build
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --omit=dev
+RUN npm ci --ignore-scripts
 COPY . .
 
 # Étape finale : le CLI npm n'est pas nécessaire pour exécuter l'app,
