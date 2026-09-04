@@ -233,7 +233,7 @@ jobs:
   ##########################################################################
   # 7. IMAGE SCAN - Trivy
   ##########################################################################
-  scan-images:
+   scan-images:
     runs-on: ubuntu-latest
     needs: build-images
     strategy:
@@ -247,6 +247,24 @@ jobs:
           name: ${{ matrix.service }}-image
       - name: Charger l'image Docker
         run: docker load -i ${{ matrix.service }}-image.tar
+
+      # Rapport complet, non filtré par l'affichage GitHub, à télécharger
+      - name: Scan Trivy - rapport complet (non bloquant, pour diagnostic)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: "${{ matrix.service }}:${{ github.sha }}"
+          format: "table"
+          output: "trivy-report-${{ matrix.service }}.txt"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+
+      - name: Sauvegarder le rapport Trivy
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-report-${{ matrix.service }}
+          path: trivy-report-${{ matrix.service }}.txt
+          retention-days: 5
+
       - name: Scan Trivy (Critical/High = bloquant)
         uses: aquasecurity/trivy-action@master
         with:
