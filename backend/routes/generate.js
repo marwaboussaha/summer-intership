@@ -5,6 +5,11 @@ import { launchSandbox } from "../sandbox/services/dockerRunner.js";
 
 const router = express.Router();
 
+// Un sandboxId ne doit contenir que ce que dockerRunner.js utilise pour
+// construire des noms d'image/conteneur : lettres, chiffres, tirets.
+// Tout le reste est rejeté avant d'atteindre le moindre appel système.
+const SANDBOX_ID_PATTERN = /^sandbox-[a-zA-Z0-9]+$/;
+
 // POST /api/generate
 router.post("/generate", async (req, res) => {
   try {
@@ -17,6 +22,14 @@ router.post("/generate", async (req, res) => {
 
     if (!userText) {
       return res.status(400).json({ error: "userText manquant dans la requête" });
+    }
+
+    // ⚠️ Validation stricte AVANT tout usage : incomingSandboxId vient
+    // directement du client et finit dans des commandes Docker
+    // (docker inspect/run) côté dockerRunner.js. Sans ce contrôle,
+    // un attaquant peut injecter des métacaractères shell.
+    if (incomingSandboxId !== undefined && !SANDBOX_ID_PATTERN.test(incomingSandboxId)) {
+      return res.status(400).json({ error: "sandboxId invalide" });
     }
 
     const isIteration = Boolean(incomingSandboxId);
@@ -58,7 +71,7 @@ router.post("/generate", async (req, res) => {
     });
   } catch (err) {
     console.error("Erreur /api/generate :", err.message);
-    res.status(500).json({ error: err.message });
+    res.status(500).json({ error: "Une erreur interne est survenue" });
   }
 });
 
