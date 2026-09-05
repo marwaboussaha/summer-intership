@@ -1,9 +1,9 @@
-import { exec } from "child_process";
+import { execFile } from "child_process";
 import { promisify } from "util";
 import net from "net";
 import path from "path";
 
-const execAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
 
 const PORT_RANGE_START = 4000;
 const PORT_RANGE_END = 4100;
@@ -35,9 +35,12 @@ async function findFreePort() {
 // ─────────────────────────────────────────────
 async function isContainerRunning(containerName) {
   try {
-    const { stdout } = await execAsync(
-      `docker inspect -f "{{.State.Running}}" ${containerName}`
-    );
+    const { stdout } = await execFileAsync("docker", [
+      "inspect",
+      "-f",
+      "{{.State.Running}}",
+      containerName,
+    ]);
     return stdout.trim() === "true";
   } catch {
     return false; // conteneur inexistant
@@ -48,7 +51,11 @@ async function isContainerRunning(containerName) {
 // Récupère le port réellement utilisé par un conteneur déjà actif
 // ─────────────────────────────────────────────
 async function getContainerPort(containerName) {
-  const { stdout } = await execAsync(`docker port ${containerName} 3000/tcp`);
+  const { stdout } = await execFileAsync("docker", [
+    "port",
+    containerName,
+    "3000/tcp",
+  ]);
   const match = /:(\d+)/.exec(stdout);
   if (!match) {
     throw new Error(`Impossible de déterminer le port du conteneur ${containerName}`);
@@ -62,9 +69,14 @@ async function getContainerPort(containerName) {
 // ─────────────────────────────────────────────
 export async function cleanupOldSandboxes(exceptContainerName) {
   try {
-    const { stdout } = await execAsync(
-      `docker ps -a --filter "name=voicecraft-sandbox-" --format "{{.Names}}"`
-    );
+    const { stdout } = await execFileAsync("docker", [
+      "ps",
+      "-a",
+      "--filter",
+      "name=voicecraft-sandbox-",
+      "--format",
+      "{{.Names}}",
+    ]);
     const containerNames = stdout
       .split("\n")
       .map((n) => n.trim())
@@ -72,7 +84,7 @@ export async function cleanupOldSandboxes(exceptContainerName) {
       .filter((n) => n !== exceptContainerName);
 
     for (const name of containerNames) {
-      await execAsync(`docker rm -f ${name}`).catch(() => {});
+      await execFileAsync("docker", ["rm", "-f", name]).catch(() => {});
     }
     return { removed: containerNames.length };
   } catch (err) {
@@ -87,9 +99,12 @@ export async function cleanupOldSandboxes(exceptContainerName) {
  */
 export async function buildSandboxImage(sandboxId) {
   const imageName = `voicecraft-sandbox-${sandboxId}`.toLowerCase();
-  const { stdout, stderr } = await execAsync(
-    `docker build -t ${imageName} ./sandboxes/${sandboxId}`
-  );
+  const { stdout, stderr } = await execFileAsync("docker", [
+    "build",
+    "-t",
+    imageName,
+    `./sandboxes/${sandboxId}`,
+  ]);
   return { imageName, stdout, stderr };
 }
 
@@ -104,7 +119,7 @@ export async function buildSandboxImage(sandboxId) {
 export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
   const containerName = `${imageName}-container`;
 
-  await execAsync(`docker rm -f ${containerName}`).catch(() => {});
+  await execFileAsync("docker", ["rm", "-f", containerName]).catch(() => {});
 
   const port =
     preferredPort && (await isPortFree(preferredPort))
@@ -113,10 +128,19 @@ export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
 
   const absSandboxPath = path.resolve("sandboxes", sandboxId);
 
-  await execAsync(
-    `docker run -d --name ${containerName} -p ${port}:3000 ` +
-      `-v "${absSandboxPath}:/app" -v /app/node_modules ${imageName}`
-  );
+  await execFileAsync("docker", [
+    "run",
+    "-d",
+    "--name",
+    containerName,
+    "-p",
+    `${port}:3000`,
+    "-v",
+    `${absSandboxPath}:/app`,
+    "-v",
+    "/app/node_modules",
+    imageName,
+  ]);
 
   return { containerName, port, url: `http://localhost:${port}` };
 }
@@ -150,7 +174,7 @@ export async function launchSandbox(sandboxId, options = {}) {
     }
     // Le conteneur n'existe plus (ex: crash, ou Docker Desktop redémarré) :
     // on retombe sur un lancement complet ci-dessous.
-    await execAsync(`docker rm -f ${containerName}`).catch(() => {});
+    await execFileAsync("docker", ["rm", "-f", containerName]).catch(() => {});
   } else {
     // Nouvelle génération : on repart propre, un seul projet actif à la fois.
     await cleanupOldSandboxes();
