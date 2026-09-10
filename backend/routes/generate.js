@@ -5,6 +5,10 @@ import { launchSandbox } from "../sandbox/services/dockerRunner.js";
 
 const router = express.Router();
 
+// N'autorise que lettres, chiffres, tirets et underscores dans un sandboxId.
+// Bloque toute tentative de path traversal (../, /, \, etc.) dès l'entrée.
+const SANDBOX_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
 // POST /api/generate
 router.post("/generate", async (req, res) => {
   try {
@@ -17,6 +21,11 @@ router.post("/generate", async (req, res) => {
 
     if (!userText) {
       return res.status(400).json({ error: "userText manquant dans la requête" });
+    }
+
+    // ⭐ Validation du sandboxId fourni par le client AVANT toute utilisation.
+    if (incomingSandboxId && !SANDBOX_ID_PATTERN.test(incomingSandboxId)) {
+      return res.status(400).json({ error: "sandboxId invalide" });
     }
 
     const isIteration = Boolean(incomingSandboxId);
@@ -57,8 +66,12 @@ router.post("/generate", async (req, res) => {
       }
     });
   } catch (err) {
-    console.error("Erreur /api/generate :", err.message);
-    res.status(500).json({ error: err.message });
+    // ⭐ On ne logue jamais err.message brut (peut contenir des données
+    // contrôlées par l'utilisateur → log injection / log forging).
+    // On logue un message générique + la stack pour le diagnostic interne,
+    // et on renvoie une erreur générique au client.
+    console.error("Erreur /api/generate :", err.stack || "unknown error");
+    res.status(500).json({ error: "Une erreur interne est survenue." });
   }
 });
 
