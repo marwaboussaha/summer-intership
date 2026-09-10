@@ -10,12 +10,43 @@ dotenv.config();
 
 const app = express();
 
-app.use(cors()); // autorise le front (Vite, port 5173) à appeler ce backend
+// Ne pas divulguer la techno utilisée (X-Powered-By: Express)
+app.disable("x-powered-by");
+
+// CORS restreint aux origines autorisées (au lieu de cors() ouvert à tous)
+const allowedOrigins = [
+  "http://localhost:5173", // front en dev (Vite)
+  process.env.FRONTEND_URL, // front en prod, ex: https://voicecraft.monapp.com
+].filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      // origin est undefined pour les requêtes sans en-tête Origin (curl, mobile...)
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
+    credentials: true,
+  })
+);
+
 app.use(express.json({ limit: "1mb" }));
+
+// Fonction utilitaire pour éviter l'injection de logs (CRLF / faux logs)
+function sanitizeForLog(value) {
+  return String(value)
+    .replace(/[\r\n]/g, "") // supprime retours à la ligne / retours chariot
+    .slice(0, 200); // limite la longueur
+}
 
 // Petit log utile pendant le dev
 app.use((req, _res, next) => {
-  console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
+  console.log(
+    `${new Date().toISOString()} ${sanitizeForLog(req.method)} ${sanitizeForLog(req.url)}`
+  );
   next();
 });
 
