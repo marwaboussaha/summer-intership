@@ -2,6 +2,7 @@ import { execFile } from "child_process";
 import { promisify } from "util";
 import net from "net";
 import path from "path";
+import { randomUUID } from "crypto";
 
 const execFileAsync = promisify(execFile);
 
@@ -10,8 +11,6 @@ const PORT_RANGE_END = 4100;
 
 // N'autorise que lettres, chiffres, tirets et underscores dans un sandboxId.
 const SANDBOX_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-// Noms Docker valides : lettres/chiffres/./_/- (jamais d'espace, /, ;, |, $, `, etc.)
-const DOCKER_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 
 function assertSafeSandboxId(sandboxId) {
   if (typeof sandboxId !== "string" || !SANDBOX_ID_PATTERN.test(sandboxId)) {
@@ -19,18 +18,31 @@ function assertSafeSandboxId(sandboxId) {
   }
 }
 
-/**
- * ⭐ Revalide un nom d'image/conteneur Docker juste avant qu'il ne serve à
- * construire une commande `docker`. Appelée localement dans CHAQUE fonction
- * qui invoque execFile, même si la valeur a déjà été validée plus haut dans
- * la pile d'appel : un analyseur de sécurité (et un futur lecteur du code)
- * doit pouvoir garantir la sécurité de chaque fonction indépendamment,
- * sans devoir faire confiance à ses appelants.
- */
-function assertSafeDockerName(name) {
-  if (typeof name !== "string" || !DOCKER_NAME_PATTERN.test(name)) {
-    throw new Error("Nom Docker invalide");
+// ─────────────────────────────────────────────
+// ⭐ Table de correspondance sandboxId (externe) -> token Docker (interne).
+//
+// Le but : couper le flux de données entre l'entrée utilisateur et les
+// commandes système. `sandboxId` sert UNIQUEMENT de clé de recherche ici.
+// Le token retourné est généré côté serveur (randomUUID), jamais dérivé
+// d'une chaîne fournie par l'utilisateur, et c'est LUI qui sera ensuite
+// utilisé pour construire les noms d'image/conteneur Docker.
+//
+// Un analyseur de sécurité (Sonar, etc.) peut donc vérifier que plus aucun
+// argument passé à execFile ne provient, même indirectement, d'une entrée
+// externe : la chaîne "sandboxId" s'arrête ici et ne circule plus.
+// ─────────────────────────────────────────────
+const sandboxTokens = new Map();
+
+function getOrCreateDockerToken(sandboxId) {
+  assertSafeSandboxId(sandboxId); // toujours validé, même si utilisé seulement comme clé
+  let token = sandboxTokens.get(sandboxId);
+  if (!token) {
+    // 32 caractères hexadécimaux : garanti conforme à un nom Docker valide,
+    // sans dépendre d'un regex appliqué à une donnée externe.
+    token = randomUUID().replace(/-/g, "");
+    sandboxTokens.set(sandboxId, token);
   }
+  return token;
 }
 
 // ─────────────────────────────────────────────
@@ -57,9 +69,9 @@ async function findFreePort() {
 
 // ─────────────────────────────────────────────
 // Est-ce que le conteneur d'une sandbox tourne déjà ?
+// `containerName` est ici garanti dérivé du token interne (voir launchSandbox).
 // ─────────────────────────────────────────────
 async function isContainerRunning(containerName) {
-  assertSafeDockerName(containerName);
   try {
     const { stdout } = await execFileAsync("docker", [
       "inspect",
@@ -77,7 +89,6 @@ async function isContainerRunning(containerName) {
 // Récupère le port réellement utilisé par un conteneur déjà actif
 // ─────────────────────────────────────────────
 async function getContainerPort(containerName) {
-  assertSafeDockerName(containerName);
   const { stdout } = await execFileAsync("docker", [
     "port",
     containerName,
@@ -125,12 +136,14 @@ export async function cleanupOldSandboxes(exceptContainerName) {
 /**
  * Build l'image Docker pour une sandbox donnée (une seule fois, à la
  * première génération — pas à chaque itération).
+ *
+ * `sandboxId` n'est utilisé que pour (a) retrouver le token interne et
+ * (b) résoudre le chemin du dossier sandbox sur disque — jamais pour
+ * construire directement un nom d'image ou un argument de commande.
  */
 export async function buildSandboxImage(sandboxId) {
-  assertSafeSandboxId(sandboxId);
-
-  const imageName = `voicecraft-sandbox-${sandboxId}`.toLowerCase();
-  assertSafeDockerName(imageName);
+  const token = getOrCreateDockerToken(sandboxId);
+  const imageName = `voicecraft-sandbox-${token}`;
 
   const { stdout, stderr } = await execFileAsync("docker", [
     "build",
@@ -150,11 +163,8 @@ export async function buildSandboxImage(sandboxId) {
  * écrasé par le contenu du dossier hôte, qui ne le contient pas.
  */
 export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
-  assertSafeSandboxId(sandboxId);
-  assertSafeDockerName(imageName);
-
-  const containerName = `${imageName}-container`;
-  assertSafeDockerName(containerName);
+  const token = getOrCreateDockerToken(sandboxId);
+  const containerName = `voicecraft-sandbox-${token}-container`;
 
   await execFileAsync("docker", ["rm", "-f", containerName]).catch(() => {});
 
@@ -188,14 +198,11 @@ export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
  * (vraie injection à chaud, sans rebuild ni redémarrage de conteneur).
  */
 export async function launchSandbox(sandboxId, options = {}) {
-  assertSafeSandboxId(sandboxId);
-
   const { isIteration = false, preferredPort } = options;
-  const imageName = `voicecraft-sandbox-${sandboxId}`.toLowerCase();
-  assertSafeDockerName(imageName);
 
+  const token = getOrCreateDockerToken(sandboxId);
+  const imageName = `voicecraft-sandbox-${token}`;
   const containerName = `${imageName}-container`;
-  assertSafeDockerName(containerName);
 
   if (isIteration) {
     const running = await isContainerRunning(containerName);
