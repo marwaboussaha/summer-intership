@@ -8,6 +8,22 @@ const execFileAsync = promisify(execFile);
 const PORT_RANGE_START = 4000;
 const PORT_RANGE_END = 4100;
 
+// N'autorise que lettres, chiffres, tirets et underscores dans un sandboxId.
+const SANDBOX_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+
+/**
+ * ⭐ Valide le format de sandboxId AVANT toute utilisation dans une commande
+ * OS ou un chemin de fichier. Deuxième ligne de défense : même si l'appelant
+ * (routes/generate.js) valide déjà en amont, ce fichier manipule directement
+ * `docker` via execFile — on ne fait jamais confiance à une donnée qui
+ * traverse une frontière de module sans la revalider ici.
+ */
+function assertSafeSandboxId(sandboxId) {
+  if (typeof sandboxId !== "string" || !SANDBOX_ID_PATTERN.test(sandboxId)) {
+    throw new Error("Identifiant de sandbox invalide");
+  }
+}
+
 // ─────────────────────────────────────────────
 // Vérification de port au niveau du système d'exploitation
 // ─────────────────────────────────────────────
@@ -98,6 +114,8 @@ export async function cleanupOldSandboxes(exceptContainerName) {
  * première génération — pas à chaque itération).
  */
 export async function buildSandboxImage(sandboxId) {
+  assertSafeSandboxId(sandboxId);
+
   const imageName = `voicecraft-sandbox-${sandboxId}`.toLowerCase();
   const { stdout, stderr } = await execFileAsync("docker", [
     "build",
@@ -117,6 +135,8 @@ export async function buildSandboxImage(sandboxId) {
  * écrasé par le contenu du dossier hôte, qui ne le contient pas.
  */
 export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
+  assertSafeSandboxId(sandboxId);
+
   const containerName = `${imageName}-container`;
 
   await execFileAsync("docker", ["rm", "-f", containerName]).catch(() => {});
@@ -151,6 +171,10 @@ export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
  * (vraie injection à chaud, sans rebuild ni redémarrage de conteneur).
  */
 export async function launchSandbox(sandboxId, options = {}) {
+  // ⭐ Validation en tout premier, avant toute construction de nom
+  // d'image/conteneur ou de commande docker.
+  assertSafeSandboxId(sandboxId);
+
   const { isIteration = false, preferredPort } = options;
   const imageName = `voicecraft-sandbox-${sandboxId}`.toLowerCase();
   const containerName = `${imageName}-container`;
