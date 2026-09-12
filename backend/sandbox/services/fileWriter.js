@@ -1,26 +1,15 @@
 import fs from "fs/promises";
 import path from "path";
-
-// Racine où toutes les sandboxes seront créées (en dehors de backend/ et frontend/)
-const SANDBOX_ROOT = path.resolve("sandboxes");
-
-// N'autorise que lettres, chiffres, tirets et underscores.
-const SANDBOX_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-/**
- * Vérifie que le sandboxId est un identifiant simple, sans séparateur de
- * chemin ni séquence de traversal (../, /, \, etc.).
- * Deuxième ligne de défense même si generate.js valide déjà en amont.
- */
-function assertSafeSandboxId(sandboxId) {
-  if (typeof sandboxId !== "string" || !SANDBOX_ID_PATTERN.test(sandboxId)) {
-    throw new Error("Identifiant de sandbox invalide");
-  }
-}
+import { resolveSandboxDir } from "./dockerRunner.js";
 
 /**
  * Vérifie qu'un chemin de fichier reste bien à l'intérieur du dossier sandbox
- * (protection anti path-traversal, ex: "../../etc/passwd")
+ * (protection anti path-traversal, ex: "../../etc/passwd").
+ *
+ * Ce contrôle reste nécessaire même si le dossier de base (`basePath`) est
+ * lui-même garanti sûr : `file.path` vient des fichiers générés (ex: par
+ * Groq), pas de sandboxId, et rien ne garantit qu'un chemin relatif malicieux
+ * n'y soit jamais injecté.
  */
 function isPathSafe(basePath, filePath) {
   const resolved = path.resolve(basePath, filePath);
@@ -29,21 +18,23 @@ function isPathSafe(basePath, filePath) {
 
 /**
  * Écrit tous les fichiers générés par Groq dans un dossier sandbox dédié.
+ *
+ * ⭐ Le dossier est résolu via `resolveSandboxDir()` (dockerRunner.js),
+ * jamais construit ici à partir de `sandboxId` directement. C'est le même
+ * mécanisme que `buildSandboxImage`/`runSandboxContainer` utilisent pour le
+ * bind mount Docker : en centralisant la résolution dans une seule fonction
+ * partagée, on garantit que fileWriter.js écrit exactement dans le dossier
+ * que dockerRunner.js montera dans le conteneur — aucune divergence
+ * possible entre les deux modules.
+ *
  * @param {string} sandboxId - identifiant unique (ex: userId + timestamp)
  * @param {Array<{path:string, content:string}>} files - fichiers reçus de Groq
  * @returns {string} le chemin absolu du dossier sandbox créé
  */
 export async function writeSandboxFiles(sandboxId, files) {
-  // ⭐ Validation AVANT toute construction de chemin.
-  assertSafeSandboxId(sandboxId);
-
-  const sandboxPath = path.join(SANDBOX_ROOT, sandboxId);
-
-  // Sécurité supplémentaire : s'assurer que le chemin final reste bien
-  // sous SANDBOX_ROOT (défense en profondeur).
-  if (!isPathSafe(SANDBOX_ROOT, sandboxId)) {
-    throw new Error("Chemin de sandbox non autorisé");
-  }
+  // resolveSandboxDir() valide sandboxId en interne (assertSafeSandboxId)
+  // avant de dériver le token — pas besoin de dupliquer cette validation ici.
+  const sandboxPath = resolveSandboxDir(sandboxId);
 
   // Crée le dossier racine de cette sandbox s'il n'existe pas
   await fs.mkdir(sandboxPath, { recursive: true });

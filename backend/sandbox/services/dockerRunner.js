@@ -45,6 +45,23 @@ function getOrCreateDockerToken(sandboxId) {
   return token;
 }
 
+/**
+ * ⭐ Résout le dossier sandbox sur disque à partir du token interne, jamais
+ * à partir de `sandboxId` directement. C'est cette fonction — et elle seule —
+ * qui doit être utilisée partout où un chemin sandbox sert d'argument à une
+ * commande système (docker build, docker run -v) OU à une écriture de
+ * fichier (voir fileWriter.js, qui doit appeler exactement cette même
+ * fonction pour rester cohérent avec les conteneurs).
+ *
+ * Résultat : aucune commande système ne reçoit plus jamais, même
+ * indirectement, un fragment de chaîne fourni par l'utilisateur — que ce
+ * soit pour un nom Docker ou pour un chemin de fichier.
+ */
+export function resolveSandboxDir(sandboxId) {
+  const token = getOrCreateDockerToken(sandboxId);
+  return path.resolve("sandboxes", token);
+}
+
 // ─────────────────────────────────────────────
 // Vérification de port au niveau du système d'exploitation
 // ─────────────────────────────────────────────
@@ -144,12 +161,13 @@ export async function cleanupOldSandboxes(exceptContainerName) {
 export async function buildSandboxImage(sandboxId) {
   const token = getOrCreateDockerToken(sandboxId);
   const imageName = `voicecraft-sandbox-${token}`;
+  const sandboxDir = resolveSandboxDir(sandboxId); // basé sur le token, pas sur sandboxId
 
   const { stdout, stderr } = await execFileAsync("docker", [
     "build",
     "-t",
     imageName,
-    `./sandboxes/${sandboxId}`,
+    sandboxDir,
   ]);
   return { imageName, stdout, stderr };
 }
@@ -173,7 +191,7 @@ export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
       ? preferredPort
       : await findFreePort();
 
-  const absSandboxPath = path.resolve("sandboxes", sandboxId);
+  const sandboxDir = resolveSandboxDir(sandboxId); // basé sur le token, pas sur sandboxId
 
   await execFileAsync("docker", [
     "run",
@@ -183,7 +201,7 @@ export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
     "-p",
     `${port}:3000`,
     "-v",
-    `${absSandboxPath}:/app`,
+    `${sandboxDir}:/app`,
     "-v",
     "/app/node_modules",
     imageName,
