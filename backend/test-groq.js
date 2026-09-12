@@ -14,8 +14,14 @@ const response = await groq.chat.completions.create({
 
 const content = response.choices[0].message.content;
 
-// ⭐ On ne logue jamais une donnée externe (réponse API) brute : elle
-// pourrait contenir des sauts de ligne ou caractères de contrôle
-// permettant de falsifier les logs (log injection / log forging).
-// JSON.stringify échappe automatiquement ces caractères.
-console.log(JSON.stringify({ groqResponse: content }));
+/**
+ * ⭐ Neutralise les caractères de contrôle (retours à la ligne, tabulations,
+ * caractères ASCII < 0x20 et 0x7F) avant tout passage à un logger.
+ * Empêche qu'une réponse externe (API tierce) ne puisse forger de fausses
+ * lignes de log ou injecter des séquences de contrôle terminal.
+ */
+function sanitizeForLog(value) {
+  return String(value).replace(/[\r\n\t\x00-\x1F\x7F]/g, " ");
+}
+
+console.log("Réponse Groq :", sanitizeForLog(content));
