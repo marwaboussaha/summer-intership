@@ -10,17 +10,26 @@ const PORT_RANGE_END = 4100;
 
 // N'autorise que lettres, chiffres, tirets et underscores dans un sandboxId.
 const SANDBOX_ID_PATTERN = /^[a-zA-Z0-9_-]+$/;
+// Noms Docker valides : lettres/chiffres/./_/- (jamais d'espace, /, ;, |, $, `, etc.)
+const DOCKER_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 
-/**
- * ⭐ Valide le format de sandboxId AVANT toute utilisation dans une commande
- * OS ou un chemin de fichier. Deuxième ligne de défense : même si l'appelant
- * (routes/generate.js) valide déjà en amont, ce fichier manipule directement
- * `docker` via execFile — on ne fait jamais confiance à une donnée qui
- * traverse une frontière de module sans la revalider ici.
- */
 function assertSafeSandboxId(sandboxId) {
   if (typeof sandboxId !== "string" || !SANDBOX_ID_PATTERN.test(sandboxId)) {
     throw new Error("Identifiant de sandbox invalide");
+  }
+}
+
+/**
+ * ⭐ Revalide un nom d'image/conteneur Docker juste avant qu'il ne serve à
+ * construire une commande `docker`. Appelée localement dans CHAQUE fonction
+ * qui invoque execFile, même si la valeur a déjà été validée plus haut dans
+ * la pile d'appel : un analyseur de sécurité (et un futur lecteur du code)
+ * doit pouvoir garantir la sécurité de chaque fonction indépendamment,
+ * sans devoir faire confiance à ses appelants.
+ */
+function assertSafeDockerName(name) {
+  if (typeof name !== "string" || !DOCKER_NAME_PATTERN.test(name)) {
+    throw new Error("Nom Docker invalide");
   }
 }
 
@@ -50,6 +59,7 @@ async function findFreePort() {
 // Est-ce que le conteneur d'une sandbox tourne déjà ?
 // ─────────────────────────────────────────────
 async function isContainerRunning(containerName) {
+  assertSafeDockerName(containerName);
   try {
     const { stdout } = await execFileAsync("docker", [
       "inspect",
@@ -67,6 +77,7 @@ async function isContainerRunning(containerName) {
 // Récupère le port réellement utilisé par un conteneur déjà actif
 // ─────────────────────────────────────────────
 async function getContainerPort(containerName) {
+  assertSafeDockerName(containerName);
   const { stdout } = await execFileAsync("docker", [
     "port",
     containerName,
@@ -93,6 +104,8 @@ export async function cleanupOldSandboxes(exceptContainerName) {
       "--format",
       "{{.Names}}",
     ]);
+    // Les noms viennent de `docker ps` (sortie du système, pas de l'utilisateur) :
+    // pas de donnée externe ici, seule la comparaison utilise exceptContainerName.
     const containerNames = stdout
       .split("\n")
       .map((n) => n.trim())
@@ -117,6 +130,8 @@ export async function buildSandboxImage(sandboxId) {
   assertSafeSandboxId(sandboxId);
 
   const imageName = `voicecraft-sandbox-${sandboxId}`.toLowerCase();
+  assertSafeDockerName(imageName);
+
   const { stdout, stderr } = await execFileAsync("docker", [
     "build",
     "-t",
@@ -136,8 +151,10 @@ export async function buildSandboxImage(sandboxId) {
  */
 export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
   assertSafeSandboxId(sandboxId);
+  assertSafeDockerName(imageName);
 
   const containerName = `${imageName}-container`;
+  assertSafeDockerName(containerName);
 
   await execFileAsync("docker", ["rm", "-f", containerName]).catch(() => {});
 
@@ -171,13 +188,14 @@ export async function runSandboxContainer(imageName, sandboxId, preferredPort) {
  * (vraie injection à chaud, sans rebuild ni redémarrage de conteneur).
  */
 export async function launchSandbox(sandboxId, options = {}) {
-  // ⭐ Validation en tout premier, avant toute construction de nom
-  // d'image/conteneur ou de commande docker.
   assertSafeSandboxId(sandboxId);
 
   const { isIteration = false, preferredPort } = options;
   const imageName = `voicecraft-sandbox-${sandboxId}`.toLowerCase();
+  assertSafeDockerName(imageName);
+
   const containerName = `${imageName}-container`;
+  assertSafeDockerName(containerName);
 
   if (isIteration) {
     const running = await isContainerRunning(containerName);
