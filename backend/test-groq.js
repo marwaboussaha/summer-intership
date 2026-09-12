@@ -12,4 +12,10 @@ const response = await groq.chat.completions.create({
   messages: [{ role: "user", content: "dis juste bonjour" }]
 });
 
-console.log(response.choices[0].message.content);
+const content = response.choices[0].message.content;
+
+// ⭐ On ne logue jamais une donnée externe (réponse API) brute : elle
+// pourrait contenir des sauts de ligne ou caractères de contrôle
+// permettant de falsifier les logs (log injection / log forging).
+// JSON.stringify échappe automatiquement ces caractères.
+console.log(JSON.stringify({ groqResponse: content }));

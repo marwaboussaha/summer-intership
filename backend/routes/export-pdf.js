@@ -18,7 +18,7 @@ router.get("/export-pdf", async (req, res) => {
   // plage de ports réellement utilisée par les sandboxes Docker (4000-4100),
   // définie dans dockerRunner.js.
   const urlMatch = /^http:\/\/localhost:(\d+)(\/.*)?$/.exec(url);
-  const port = urlMatch ? parseInt(urlMatch[1], 10) : null;
+  const port = urlMatch ? Number.parseInt(urlMatch[1], 10) : null;
   const isValidSandboxUrl = port !== null && port >= 4000 && port <= 4100;
 
   if (!isValidSandboxUrl) {
@@ -51,8 +51,8 @@ router.get("/export-pdf", async (req, res) => {
     });
     res.end(pdfBuffer);
   } catch (err) {
-    console.error("Erreur export PDF :", err.message);
-    res.status(500).json({ error: `Échec de l'export PDF : ${err.message}` });
+    console.error("Erreur export PDF :", err.stack || "unknown error");
+    res.status(500).json({ error: "Échec de l'export PDF" });
   } finally {
     if (browser) await browser.close();
   }

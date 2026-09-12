@@ -60,7 +60,7 @@ async function getContainerPort(containerName) {
   if (!match) {
     throw new Error(`Impossible de déterminer le port du conteneur ${containerName}`);
   }
-  return parseInt(match[1], 10);
+  return Number.parseInt(match[1], 10);
 }
 
 // ─────────────────────────────────────────────
