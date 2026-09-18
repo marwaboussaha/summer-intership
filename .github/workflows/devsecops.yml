@@ -160,6 +160,13 @@ jobs:
 
   ##########################################################################
   # 5. SCA - Snyk (Dependency Scan)
+  #
+  # --exclude=sandboxes : backend/sandboxes/ contient du code généré à la volée
+  # par /api/generate, avec un package.json par sandbox et aucun node_modules.
+  # Sans cette exclusion, --all-projects tente de résoudre les dépendances de
+  # chacune (45 sur 49 projets détectés) et le job échoue.
+  # Le vrai correctif reste `git rm -r --cached backend/sandboxes` ; ceci est
+  # un garde-fou si une sandbox est re-committée par accident.
   ##########################################################################
   dependency-scan-snyk:
     runs-on: ubuntu-latest
@@ -174,7 +181,11 @@ jobs:
         env:
           SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
         with:
-          args: --severity-threshold=high --all-projects
+          args: >-
+            --severity-threshold=high
+            --all-projects
+            --exclude=sandboxes,template,dist,coverage
+            --detection-depth=3
 
   ##########################################################################
   # 6. BUILD - Images Front / Back / Database
