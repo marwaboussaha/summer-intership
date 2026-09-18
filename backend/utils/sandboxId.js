@@ -8,6 +8,8 @@
  *     utilisent la même fonction, impossible qu'elles divergent.
  */
 
+import { randomBytes } from "node:crypto";
+
 // Format canonique produit par le serveur : `sandbox-${Date.now()}`.
 //
 // Le préfixe obligatoire n'est pas cosmétique : il garantit que la valeur ne
@@ -36,11 +38,18 @@ export function isValidSandboxId(id) {
 
 /**
  * Génère un identifiant de sandbox conforme au format attendu.
- * Un suffixe aléatoire est ajouté pour éviter toute collision entre deux
- * requêtes arrivant dans la même milliseconde.
+ *
+ * Le suffixe évite les collisions entre deux requêtes arrivant dans la même
+ * milliseconde, et rend l'identifiant non devinable : sans lui, un tiers
+ * pourrait cibler la sandbox d'un autre utilisateur en énumérant les
+ * timestamps. randomBytes est un CSPRNG ; Math.random() ne l'est pas
+ * (état interne de V8 inférable à partir de quelques sorties — S2245 / CWE-338).
+ *
+ * randomBytes(6).toString("hex") produit 12 caractères [0-9a-f], donc
+ * compatible avec SANDBOX_ID_PATTERN.
  */
 export function createSandboxId() {
-  const suffix = Math.random().toString(36).slice(2, 8);
+  const suffix = randomBytes(6).toString("hex");
   return `sandbox-${Date.now()}${suffix}`;
 }
 

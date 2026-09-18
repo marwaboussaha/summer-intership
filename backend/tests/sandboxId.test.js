@@ -15,6 +15,21 @@ describe("isValidSandboxId — identifiants légitimes", () => {
       expect(isValidSandboxId(createSandboxId())).toBe(true);
     }
   });
+
+  test("createSandboxId() ne produit pas de collision", () => {
+    const ids = new Set();
+    for (let i = 0; i < 1000; i++) {
+      ids.add(createSandboxId());
+    }
+    expect(ids.size).toBe(1000);
+  });
+
+  test("createSandboxId() ajoute bien un suffixe aléatoire non vide", () => {
+    const id = createSandboxId();
+    expect(id.startsWith("sandbox-")).toBe(true);
+    // 8 ("sandbox-") + 13 (timestamp ms) + 12 (suffixe hex) = 33
+    expect(id).toHaveLength(33);
+  });
 });
 
 describe("isValidSandboxId — injection de commande OS", () => {
