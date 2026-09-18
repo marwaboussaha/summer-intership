@@ -8,3 +8,16 @@ test-*.js
 test-*.json
 debug-*.pdf
 .git
+node_modules
+coverage
+tests
+sandboxes
+.env
+.env.*
+*.pem
+*.key
+.git
+.github
+Dockerfile
+.dockerignore
+npm-debug.log
