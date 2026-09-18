@@ -243,6 +243,9 @@ jobs:
     runs-on: ubuntu-latest
     needs: build-images
     timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write   # requis pour l'upload SARIF vers GitHub Security
     strategy:
       fail-fast: false
       matrix:
@@ -274,12 +277,90 @@ jobs:
           if-no-files-found: warn
           retention-days: 5
 
+      ######################################################################
+      # Onglet "Security and quality" du dépôt : format SARIF
+      # ATTENTION : le code scanning n'est disponible sur un dépôt PRIVÉ
+      # qu'avec GitHub Advanced Security. Sans licence, l'upload renvoie 403,
+      # d'où le continue-on-error (le rapport reste dans les artefacts).
+      ######################################################################
+      - name: Scan Trivy - format SARIF
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: "${{ matrix.service }}:${{ github.sha }}"
+          format: "sarif"
+          output: "trivy-${{ matrix.service }}.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: "0"
+
+      - name: Publier le SARIF dans GitHub Security
+        if: always()
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@42c378ffbb438be29e3e1848d520fb0a8ee1c271 # v3.38.0
+        with:
+          sarif_file: "trivy-${{ matrix.service }}.sarif"
+          category: "trivy-${{ matrix.service }}"
+
       - name: Scan Trivy (Critical/High = bloquant)
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: "${{ matrix.service }}:${{ github.sha }}"
           severity: "CRITICAL,HIGH"
           exit-code: "1"
+
+  ##########################################################################
+  # 7 bis. NOTIFICATION - Envoi des rapports Trivy par mail
+  #
+  # Job séparé : il s'exécute une seule fois (pas par service) et surtout
+  # avec if: always(), donc il part MÊME quand un scan a échoué — c'est
+  # précisément dans ce cas que le rapport est utile.
+  ##########################################################################
+  notify-scan-results:
+    runs-on: ubuntu-latest
+    needs: scan-images
+    if: always()
+    timeout-minutes: 10
+    steps:
+      - name: Télécharger tous les rapports Trivy
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: trivy-report-*
+          path: rapports
+          merge-multiple: true
+
+      - name: Préparer le résumé
+        id: resume
+        run: |
+          set -euo pipefail
+          ls -la rapports/ || echo "Aucun rapport trouvé."
+          {
+            echo "Résultat des scans Trivy"
+            echo "Dépôt  : ${{ github.repository }}"
+            echo "Commit : ${{ github.sha }}"
+            echo "Statut du job de scan : ${{ needs.scan-images.result }}"
+            echo ""
+            for f in rapports/*.txt; do
+              [ -f "$f" ] || continue
+              echo "=== $(basename "$f") ==="
+              grep -E "Total:|^[a-z].*\(.*\)$" "$f" | head -20 || true
+              echo ""
+            done
+          } > resume.txt
+          cat resume.txt
+
+      - name: Envoyer les rapports par mail
+        uses: dawidd6/action-send-mail@62a2d05b79935ad4fb90ce9079928099579c14ac # v9
+        with:
+          server_address: smtp.gmail.com
+          server_port: 465
+          secure: true
+          username: ${{ secrets.MAIL_USERNAME }}
+          password: ${{ secrets.MAIL_PASSWORD }}
+          subject: "[${{ needs.scan-images.result }}] Scan Trivy - ${{ github.repository }}"
+          to: ${{ secrets.MAIL_TO }}
+          from: DevSecOps Pipeline <${{ secrets.MAIL_USERNAME }}>
+          body: file://resume.txt
+          attachments: rapports/*.txt
 
   ##########################################################################
   # 8. TAG & PUSH - GitHub Container Registry
@@ -328,11 +409,16 @@ jobs:
 
   ##########################################################################
   # 9. DEPLOY - Staging
+  #
+  # continue-on-error : sans cluster Kubernetes de staging disponible, ce job
+  # échoue sans que cela invalide la chaîne de sécurité qui précède. Retirer
+  # cette ligne dès qu'un vrai cluster est branché.
   ##########################################################################
   deploy-staging:
     runs-on: ubuntu-latest
     needs: tag-and-push
     if: github.event_name != 'pull_request'
+    continue-on-error: true
     environment: staging
     timeout-minutes: 20
     steps:
@@ -344,6 +430,13 @@ jobs:
           KUBE_CONFIG: ${{ secrets.KUBE_CONFIG }}
         run: |
           set -euo pipefail
+          # Sans ce contrôle, kubectl se rabat silencieusement sur
+          # localhost:8080 et l'erreur devient incompréhensible.
+          if [ -z "${KUBE_CONFIG}" ]; then
+            echo "::error::Le secret KUBE_CONFIG est vide ou absent."
+            echo "Renseignez-le dans Settings > Secrets and variables > Actions."
+            exit 1
+          fi
           umask 077
           printf '%s' "$KUBE_CONFIG" > kubeconfig.yaml
 
@@ -375,6 +468,7 @@ jobs:
     runs-on: ubuntu-latest
     needs: deploy-staging
     if: github.event_name != 'pull_request'
+    continue-on-error: true   # dépend d'un staging réellement déployé
     timeout-minutes: 30
     steps:
       - name: OWASP ZAP Baseline Scan
