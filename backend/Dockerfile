@@ -23,7 +23,6 @@ COPY --chown=node:node server.js ./
 COPY --chown=node:node routes ./routes
 COPY --chown=node:node services ./services
 COPY --chown=node:node utils ./utils
-COPY --chown=node:node sandbox ./sandbox
 
 USER node
 EXPOSE 3000
