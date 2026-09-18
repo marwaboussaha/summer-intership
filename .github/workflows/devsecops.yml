@@ -68,6 +68,10 @@ jobs:
 
   ##########################################################################
   # 3. SAST - SonarQube / SonarCloud
+  #
+  # Les tests tournent DANS CE JOB, avant le scan : le fichier lcov.info est
+  # écrit sur le disque du runner, et le scanner le lit depuis ce disque.
+  # Dans un autre job (machine neuve), il n'existerait plus.
   ##########################################################################
   sast-sonarqube:
     runs-on: ubuntu-latest
@@ -77,6 +81,30 @@ jobs:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           fetch-depth: 0
+
+      - uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4.1.0
+        with:
+          node-version: 18
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Tests + couverture
+        run: cd backend && npm ci --ignore-scripts && npm run test:coverage
+
+      # Jest écrit des chemins relatifs à backend/ (SF:utils/sandboxId.js),
+      # alors que le scanner tourne à la racine du repo. Sans cette réécriture,
+      # Sonar ne résout aucun fichier et jette silencieusement la couverture
+      # -> 0.0 % affiché alors que les tests couvrent réellement le code.
+      - name: Mapper les chemins lcov depuis la racine du repo
+        run: |
+          set -euo pipefail
+          if [ ! -f backend/coverage/lcov.info ]; then
+            echo "::error::backend/coverage/lcov.info introuvable. Les tests ont-ils bien tourné ?"
+            exit 1
+          fi
+          sed -i 's|^SF:|SF:backend/|' backend/coverage/lcov.info
+          echo "Chemins après réécriture (doit afficher SF:backend/...) :"
+          grep '^SF:' backend/coverage/lcov.info
 
       - name: SonarQube Scan
         uses: SonarSource/sonarqube-scan-action@13990a695682794b53148ff9f6a8b6e22e43955e # v3.1.0
