@@ -1,4 +1,4 @@
-FROM node:18-alpine AS build
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --ignore-scripts
@@ -6,6 +6,9 @@ COPY . .
 RUN npm run build
 
 FROM nginx:alpine
+# Applique les correctifs Alpine disponibles (CVE remontees par Trivy)
+RUN apk upgrade --no-cache
+
 # Ecoute sur 8080 (port non privilegie) et pid dans /tmp : nginx tourne
 # en utilisateur non root, il ne peut ecrire ni sur le port 80 ni dans /run.
 COPY nginx.conf /etc/nginx/conf.d/default.conf
