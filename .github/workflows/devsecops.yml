@@ -353,7 +353,11 @@ jobs:
   tag-and-push:
     runs-on: ubuntu-latest
     needs: scan-images
-    if: github.event_name != 'pull_request'
+    # Saute la publication quand l'infrastructure AWS n'est pas deployee :
+    # la variable AWS_DEPLOY_ROLE_ARN n'est renseignee que lorsque le compte
+    # AWS est actif. Meme principe que la garde AWS_READY du pipeline infra :
+    # la chaine de securite reste verte sans dependre d'une infra allumee.
+    if: github.event_name != 'pull_request' && vars.AWS_DEPLOY_ROLE_ARN != ''
     timeout-minutes: 20
     permissions:
       contents: read
@@ -411,7 +415,7 @@ jobs:
   trigger-infra-deploy:
     runs-on: ubuntu-latest
     needs: tag-and-push
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && vars.AWS_DEPLOY_ROLE_ARN != ''
     timeout-minutes: 10
     steps:
       - name: Declencher le pipeline infra avec le nouveau tag
@@ -450,7 +454,7 @@ jobs:
   dast-owasp-zap:
     runs-on: ubuntu-latest
     needs: trigger-infra-deploy
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && vars.AWS_DEPLOY_ROLE_ARN != ''
     continue-on-error: true
     timeout-minutes: 30
     steps:
