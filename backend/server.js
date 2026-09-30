@@ -2,7 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import generateRouter from "./routes/generate.js";
-import connectDB from "../database/db.js";
+import connectDB from "./database/db.js";
 import authRoutes from "./routes/auth.js";
 import exportPdfRouter from "./routes/export-pdf.js"; // ⭐ nouvelle route
 

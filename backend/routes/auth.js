@@ -1,7 +1,7 @@
 import express from "express";
 import { registerUser, loginUser, toPublicUser } from "../services/authService.js";
 import requireAuth from "../middleware/auth.js";
-import User from "../../database/models/User.js";
+import User from "../database/models/User.js";
 
 const router = express.Router();
 

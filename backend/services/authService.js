@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import User from "../../database/models/User.js";
+import User from "../database/models/User.js";
 
 const SALT_ROUNDS = 10;
 const TOKEN_EXPIRY = "7d";

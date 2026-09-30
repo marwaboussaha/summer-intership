@@ -23,6 +23,13 @@ COPY --chown=node:node server.js ./
 COPY --chown=node:node routes ./routes
 COPY --chown=node:node services ./services
 COPY --chown=node:node utils ./utils
+COPY --chown=node:node database ./database
+COPY --chown=node:node sandbox ./sandbox
+COPY --chown=node:node middleware ./middleware
+
+# Autorité de certification AWS RDS/DocumentDB : requise pour la connexion TLS
+# au cluster DocumentDB en production (tls=true dans database/db.js).
+ADD --chown=node:node https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem /app/global-bundle.pem
 
 USER node
 EXPOSE 3000

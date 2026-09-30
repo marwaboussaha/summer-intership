@@ -6,7 +6,7 @@
     "start": "nodemon --legacy-watch --watch . --ext js app.js"
   },
   "dependencies": {
-    "express": "^4.19.2",
+    "express": "^4.22.3",
     "nodemon": "^3.1.0"
   }
 }

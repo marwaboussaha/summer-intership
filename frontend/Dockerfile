@@ -6,13 +6,17 @@ COPY . .
 RUN npm run build
 
 FROM nginx:alpine
-RUN addgroup -S appgroup && adduser -S appuser -G appgroup \
+# Ecoute sur 8080 (port non privilegie) et pid dans /tmp : nginx tourne
+# en utilisateur non root, il ne peut ecrire ni sur le port 80 ni dans /run.
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+RUN sed -i -E 's#^pid\s+.*;#pid /tmp/nginx.pid;#' /etc/nginx/nginx.conf \
+    && addgroup -S appgroup \
+    && adduser -S appuser -G appgroup \
     && chown -R appuser:appgroup /usr/share/nginx/html \
     && chown -R appuser:appgroup /var/cache/nginx \
     && chown -R appuser:appgroup /var/log/nginx \
-    && touch /var/run/nginx.pid \
-    && chown appuser:appgroup /var/run/nginx.pid
+    && chown -R appuser:appgroup /etc/nginx/conf.d
 COPY --from=build /app/dist /usr/share/nginx/html
 USER appuser
-EXPOSE 80
+EXPOSE 8080
 CMD ["nginx", "-g", "daemon off;"]

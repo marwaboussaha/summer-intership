@@ -1,23 +1,27 @@
-﻿.env
-.env.*
-node_modules
-sandboxes
-sandbox
-*.pdf
-test-*.js
-test-*.json
-debug-*.pdf
-.git
-node_modules
-coverage
-tests
-sandboxes
+﻿# Secrets et cles
 .env
 .env.*
 *.pem
 *.key
+
+# Dependances et artefacts
+node_modules
+coverage
+npm-debug.log
+
+# Code genere a l'execution par dockerRunner.js (jamais dans l'image)
+sandboxes
+sandbox/template/node_modules
+
+# Fichiers de test et de debug
+tests
+test-*.js
+test-*.json
+*.pdf
+debug-*.pdf
+
+# Fichiers de build et versionnement
 .git
 .github
 Dockerfile
 .dockerignore
-npm-debug.log
