@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import "./App.css";
 
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = "";
 const MAX_CHARS = 500;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
