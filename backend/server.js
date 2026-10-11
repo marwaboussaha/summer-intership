@@ -1,3 +1,4 @@
+import client from "prom-client";
 import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
@@ -12,6 +13,35 @@ const app = express();
 
 // Ne pas divulguer la techno utilisée (X-Powered-By: Express)
 app.disable("x-powered-by");
+
+// ---------------------------------------------------------------------------
+// Métriques Prometheus
+// ---------------------------------------------------------------------------
+client.collectDefaultMetrics();
+
+const httpDuration = new client.Histogram({
+  name: "http_request_duration_seconds",
+  help: "Duree des requetes HTTP",
+  labelNames: ["method", "route", "status"],
+  buckets: [0.05, 0.1, 0.3, 0.5, 1, 2, 5],
+});
+
+app.use((req, res, next) => {
+  const end = httpDuration.startTimer();
+  res.on("finish", () => {
+    end({
+      method: req.method,
+      route: req.route?.path ?? "unmatched",
+      status: res.statusCode,
+    });
+  });
+  next();
+});
+
+app.get("/api/metrics", async (_req, res) => {
+  res.set("Content-Type", client.register.contentType);
+  res.end(await client.register.metrics());
+});
 
 // CORS restreint aux origines autorisées (au lieu de cors() ouvert à tous)
 const allowedOrigins = [
@@ -42,11 +72,13 @@ function sanitizeForLog(value) {
     .slice(0, 200); // limite la longueur
 }
 
-// Petit log utile pendant le dev
+// Petit log utile pendant le dev (on ignore /api/metrics, scrapé toutes les 15 s)
 app.use((req, _res, next) => {
-  console.log(
-    `${new Date().toISOString()} ${sanitizeForLog(req.method)} ${sanitizeForLog(req.url)}`
-  );
+  if (req.url !== "/api/metrics") {
+    console.log(
+      `${new Date().toISOString()} ${sanitizeForLog(req.method)} ${sanitizeForLog(req.url)}`
+    );
+  }
   next();
 });
 
