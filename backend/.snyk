@@ -1,0 +1,18 @@
+# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.
+version: v1.25.1
+# ignores vulnerabilities until expiry date; change duration by modifying expiry date
+ignore:
+  SNYK-JS-BRACES-19963945:
+    - '*':
+        reason: 'Pas de correctif, outil de dev uniquement'
+        expires: 2026-11-08T00:00:00.000Z
+        created: 2026-10-08T15:58:11.649Z
+  SNYK-JS-ZOD-20510278:
+    - '*':
+        reason: >-
+          Aucun correctif disponible au 2026-10-11. zod utilise via openai et
+          puppeteer, sans schema fourni par un utilisateur. A reverifier a
+          l'expiration.
+        expires: 2026-11-11T00:00:00.000Z
+        created: 2026-10-11T12:15:14.917Z
+patch: {}
