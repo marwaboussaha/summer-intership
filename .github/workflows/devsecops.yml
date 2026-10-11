@@ -450,9 +450,10 @@ jobs:
   # continue-on-error : l'infrastructure est detruite hors demonstration
   # pour maitriser les couts, l'URL n'est donc pas toujours joignable.
   #
-  # Correction : "-l HIGH" n'est pas une valeur valide pour zap-baseline.py
-  # (valeurs acceptees : PASS, IGNORE, INFO, WARN, FAIL). Il provoquait un
-  # exit code 3 (erreur d'arguments) avant meme le debut du scan.
+  # Corrections : "-l HIGH" n'est pas valide pour zap-baseline.py (valeurs :
+  # PASS, IGNORE, INFO, WARN, FAIL) ; et l'action zaproxy/action-baseline
+  # echouait a publier son artefact ("zap_scan" invalide). ZAP est donc lance
+  # directement via Docker ; -I evite l'echec du job sur simples avertissements.
   ##########################################################################
   dast-owasp-zap:
     runs-on: ubuntu-latest
@@ -485,13 +486,16 @@ jobs:
 
       - name: OWASP ZAP Baseline Scan
         if: steps.check.outputs.reachable == 'true'
-        uses: zaproxy/action-baseline@66042c8e7e24680119199a017e5b0e8603bf4dae # v0.12.0
-        with:
-          target: ${{ vars.APP_URL }}
-          rules_file_name: ".zap/rules.tsv"
-          cmd_options: "-l WARN"
-          allow_issue_writing: false
-          fail_action: false
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -uo pipefail
+          chmod 777 "$PWD"
+          RULES=""
+          if [ -f .zap/rules.tsv ]; then RULES="-c .zap/rules.tsv"; fi
+          docker run --rm -v "$PWD:/zap/wrk/:rw" ghcr.io/zaproxy/zaproxy:stable \
+            zap-baseline.py -t "${APP_URL}" ${RULES} -l WARN -I \
+            -r report_html.html -w report_md.md -J report_json.json
 
       - name: Sauvegarder le rapport ZAP
         if: always()
