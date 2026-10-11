@@ -1,37 +1,63 @@
 {
   "uid": "voicecraft-backend",
-  "title": "VoiceCraft - Backend",
+  "title": "VoiceCraft - Infrastructure & App",
   "tags": [
-    "voicecraft",
-    "prometheus"
+    "voicecraft"
   ],
   "timezone": "browser",
   "schemaVersion": 39,
   "version": 1,
-  "refresh": "15s",
+  "refresh": "30s",
   "time": {
-    "from": "now-1h",
+    "from": "now-6h",
     "to": "now"
   },
-  "editable": true,
-  "graphTooltip": 1,
   "templating": {
     "list": [
       {
         "name": "datasource",
-        "label": "Source",
+        "label": "Prometheus",
         "type": "datasource",
         "query": "prometheus",
         "current": {},
         "hide": 0
+      },
+      {
+        "name": "cw",
+        "label": "CloudWatch",
+        "type": "datasource",
+        "query": "cloudwatch",
+        "current": {},
+        "hide": 0
+      },
+      {
+        "name": "instance",
+        "label": "Server",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${datasource}"
+        },
+        "query": {
+          "query": "label_values(nodejs_heap_size_used_bytes, instance)",
+          "refId": "v"
+        },
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "text": "All",
+          "value": "$__all"
+        }
       }
     ]
   },
   "panels": [
     {
       "id": 1,
-      "type": "stat",
-      "title": "Etat de l'application",
+      "type": "gauge",
+      "title": "Memory (heap)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -39,51 +65,44 @@
       "gridPos": {
         "x": 0,
         "y": 0,
-        "w": 4,
-        "h": 5
+        "w": 6,
+        "h": 8
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "up{job=\"voicecraft-backend\"}",
+          "expr": "100 * sum(nodejs_heap_size_used_bytes{instance=~\"$instance\"}) / sum(nodejs_heap_size_total_bytes{instance=~\"$instance\"})",
           "legendFormat": "",
-          "refId": "A"
+          "instant": false
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "none",
-          "mappings": [
-            {
-              "type": "value",
-              "options": {
-                "0": {
-                  "text": "DOWN",
-                  "color": "red"
-                },
-                "1": {
-                  "text": "UP",
-                  "color": "green"
-                }
-              }
-            }
-          ],
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
           "color": {
-            "mode": "thresholds"
+            "mode": "continuous-GrYlRd"
           },
           "thresholds": {
             "mode": "absolute",
             "steps": [
               {
-                "color": "red",
+                "color": "green",
                 "value": null
               },
               {
-                "color": "green",
-                "value": 1
+                "color": "yellow",
+                "value": 70
+              },
+              {
+                "color": "red",
+                "value": 90
               }
             ]
           }
@@ -91,103 +110,53 @@
         "overrides": []
       },
       "options": {
-        "colorMode": "background",
-        "graphMode": "area",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
-        "textMode": "auto"
+        "showThresholdMarkers": false,
+        "showThresholdLabels": false,
+        "orientation": "auto",
+        "sizing": "auto"
       }
     },
     {
       "id": 2,
-      "type": "stat",
-      "title": "Requetes / s",
+      "type": "gauge",
+      "title": "CPU (1 vCPU = 100%)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 4,
+        "x": 6,
         "y": 0,
-        "w": 4,
-        "h": 5
+        "w": 6,
+        "h": 8
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum(rate(http_request_duration_seconds_count{job=\"voicecraft-backend\"}[1m]))",
+          "expr": "100 * sum(rate(process_cpu_seconds_total{instance=~\"$instance\"}[2m]))",
           "legendFormat": "",
-          "refId": "A"
+          "instant": false
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "reqps",
-          "mappings": [],
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "decimals": 1,
           "color": {
-            "mode": "fixed",
-            "fixedColor": "blue"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "blue",
-                "value": null
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "colorMode": "background",
-        "graphMode": "area",
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "textMode": "auto"
-      }
-    },
-    {
-      "id": 3,
-      "type": "stat",
-      "title": "Erreurs 5xx / s",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 8,
-        "y": 0,
-        "w": 4,
-        "h": 5
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "sum(rate(http_request_duration_seconds_count{job=\"voicecraft-backend\",status=~\"5..\"}[1m])) or vector(0)",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "mappings": [],
-          "color": {
-            "mode": "thresholds"
+            "mode": "continuous-GrYlRd"
           },
           "thresholds": {
             "mode": "absolute",
@@ -197,8 +166,12 @@
                 "value": null
               },
               {
+                "color": "yellow",
+                "value": 60
+              },
+              {
                 "color": "red",
-                "value": 0.01
+                "value": 85
               }
             ]
           }
@@ -206,20 +179,23 @@
         "overrides": []
       },
       "options": {
-        "colorMode": "background",
-        "graphMode": "area",
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
-        "textMode": "auto"
+        "showThresholdMarkers": false,
+        "showThresholdLabels": false,
+        "orientation": "auto",
+        "sizing": "auto"
       }
     },
     {
-      "id": 4,
+      "id": 3,
       "type": "gauge",
-      "title": "Memoire (RSS)",
+      "title": "Erreurs 5xx",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
@@ -227,27 +203,29 @@
       "gridPos": {
         "x": 12,
         "y": 0,
-        "w": 4,
-        "h": 5
+        "w": 6,
+        "h": 8
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "process_resident_memory_bytes{job=\"voicecraft-backend\"}",
+          "expr": "100 * sum(rate(http_request_duration_seconds_count{instance=~\"$instance\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_request_duration_seconds_count{instance=~\"$instance\"}[5m])),0.0001)",
           "legendFormat": "",
-          "refId": "A"
+          "instant": false
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "bytes",
+          "unit": "percent",
           "min": 0,
-          "max": 1073741824,
+          "max": 100,
+          "decimals": 1,
           "color": {
-            "mode": "thresholds"
+            "mode": "continuous-GrYlRd"
           },
           "thresholds": {
             "mode": "absolute",
@@ -257,12 +235,12 @@
                 "value": null
               },
               {
-                "color": "orange",
-                "value": 734003200
+                "color": "yellow",
+                "value": 1
               },
               {
                 "color": "red",
-                "value": 943718400
+                "value": 5
               }
             ]
           }
@@ -273,167 +251,169 @@
         "reduceOptions": {
           "calcs": [
             "lastNotNull"
-          ]
+          ],
+          "fields": "",
+          "values": false
         },
-        "showThresholdMarkers": true
+        "showThresholdMarkers": false,
+        "showThresholdLabels": false,
+        "orientation": "auto",
+        "sizing": "auto"
+      }
+    },
+    {
+      "id": 4,
+      "type": "gauge",
+      "title": "Event loop lag",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 18,
+        "y": 0,
+        "w": 6,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "1000 * max(nodejs_eventloop_lag_seconds{instance=~\"$instance\"})",
+          "legendFormat": "",
+          "instant": false
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "ms",
+          "min": 0,
+          "max": 200,
+          "decimals": 1,
+          "color": {
+            "mode": "continuous-GrYlRd"
+          },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "yellow",
+                "value": 50
+              },
+              {
+                "color": "red",
+                "value": 150
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "showThresholdMarkers": false,
+        "showThresholdLabels": false,
+        "orientation": "auto",
+        "sizing": "auto"
       }
     },
     {
       "id": 5,
-      "type": "gauge",
-      "title": "CPU",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 16,
-        "y": 0,
-        "w": 4,
-        "h": 5
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "rate(process_cpu_seconds_total{job=\"voicecraft-backend\"}[1m])",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percentunit",
-          "min": 0,
-          "max": 1,
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.7
-              },
-              {
-                "color": "red",
-                "value": 0.9
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "showThresholdMarkers": true
-      }
-    },
-    {
-      "id": 6,
-      "type": "gauge",
-      "title": "Latence event loop",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 20,
-        "y": 0,
-        "w": 4,
-        "h": 5
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "nodejs_eventloop_lag_seconds{job=\"voicecraft-backend\"}",
-          "legendFormat": "",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "s",
-          "min": 0,
-          "max": 0.5,
-          "color": {
-            "mode": "thresholds"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "orange",
-                "value": 0.1
-              },
-              {
-                "color": "red",
-                "value": 0.3
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ]
-        },
-        "showThresholdMarkers": true
-      }
-    },
-    {
-      "id": 7,
       "type": "timeseries",
-      "title": "Memoire / CPU",
+      "title": "Uptime (secondes)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "x": 0,
-        "y": 5,
+        "y": 8,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "process_resident_memory_bytes{job=\"voicecraft-backend\"}",
-          "legendFormat": "memoire",
-          "refId": "A"
+          "expr": "time() - process_start_time_seconds{instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 0,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Memoire RSS",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "process_resident_memory_bytes{instance=~\"$instance\"}",
+          "legendFormat": "RSS {{instance}}"
         },
         {
+          "refId": "B",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "rate(process_cpu_seconds_total{job=\"voicecraft-backend\"}[1m])",
-          "legendFormat": "cpu",
-          "refId": "B"
+          "expr": "nodejs_heap_size_used_bytes{instance=~\"$instance\"}",
+          "legendFormat": "Heap utilise {{instance}}"
         }
       ],
       "fieldConfig": {
@@ -443,147 +423,101 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 25,
+            "lineWidth": 1,
+            "fillOpacity": 15,
             "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
+            "gradientMode": "opacity"
           }
         },
-        "overrides": [
-          {
-            "matcher": {
-              "id": "byName",
-              "options": "cpu"
-            },
-            "properties": [
-              {
-                "id": "unit",
-                "value": "percentunit"
-              },
-              {
-                "id": "custom.axisPlacement",
-                "value": "right"
-              },
-              {
-                "id": "color",
-                "value": {
-                  "mode": "fixed",
-                  "fixedColor": "red"
-                }
-              }
-            ]
-          }
-        ]
+        "overrides": []
       },
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Requetes / seconde par route",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "${datasource}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${datasource}"
+          },
+          "expr": "sum by (route) (rate(http_request_duration_seconds_count{instance=~\"$instance\"}[2m]))",
+          "legendFormat": "{{route}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "reqps",
+          "color": {
+            "mode": "palette-classic"
+          },
+          "custom": {
+            "lineWidth": 1,
+            "fillOpacity": 15,
+            "showPoints": "never",
+            "gradientMode": "opacity"
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Requetes par route",
+      "title": "Latence p95 par route",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
-        "y": 5,
+        "y": 16,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (route) (rate(http_request_duration_seconds_count{job=\"voicecraft-backend\"}[1m]))",
-          "legendFormat": "{{route}}",
-          "refId": "A"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "reqps",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 25,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "normal"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 9,
-      "type": "timeseries",
-      "title": "Latence (p50 / p95 / p99)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 13,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"voicecraft-backend\"}[5m])))",
-          "legendFormat": "p50",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"voicecraft-backend\"}[5m])))",
-          "legendFormat": "p95",
-          "refId": "B"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=\"voicecraft-backend\"}[5m])))",
-          "legendFormat": "p99",
-          "refId": "C"
+          "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{instance=~\"$instance\"}[5m])))",
+          "legendFormat": "{{route}}"
         }
       ],
       "fieldConfig": {
@@ -593,14 +527,10 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 25,
+            "lineWidth": 1,
+            "fillOpacity": 15,
             "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
+            "gradientMode": "opacity"
           }
         },
         "overrides": []
@@ -608,36 +538,38 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 10,
+      "id": 9,
       "type": "timeseries",
-      "title": "Codes de reponse HTTP",
+      "title": "Requetes par code HTTP",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
-        "x": 12,
-        "y": 13,
+        "x": 0,
+        "y": 24,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "sum by (status) (rate(http_request_duration_seconds_count{job=\"voicecraft-backend\"}[1m]))",
-          "legendFormat": "{{status}}",
-          "refId": "A"
+          "expr": "sum by (status) (rate(http_request_duration_seconds_count{instance=~\"$instance\"}[2m]))",
+          "legendFormat": "{{status}}"
         }
       ],
       "fieldConfig": {
@@ -647,14 +579,10 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 25,
+            "lineWidth": 1,
+            "fillOpacity": 15,
             "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "normal"
-            }
+            "gradientMode": "opacity"
           }
         },
         "overrides": []
@@ -662,99 +590,38 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
       }
     },
     {
-      "id": 11,
+      "id": 10,
       "type": "timeseries",
-      "title": "Heap Node.js",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 21,
-        "w": 12,
-        "h": 8
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "nodejs_heap_size_used_bytes{job=\"voicecraft-backend\"}",
-          "legendFormat": "utilise",
-          "refId": "A"
-        },
-        {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "nodejs_heap_size_total_bytes{job=\"voicecraft-backend\"}",
-          "legendFormat": "total",
-          "refId": "B"
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "bytes",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 25,
-            "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom"
-        },
-        "tooltip": {
-          "mode": "multi"
-        }
-      }
-    },
-    {
-      "id": 12,
-      "type": "timeseries",
-      "title": "Prometheus : cibles (1 = UP)",
+      "title": "Cible Prometheus (1 = UP)",
       "datasource": {
         "type": "prometheus",
         "uid": "${datasource}"
       },
       "gridPos": {
         "x": 12,
-        "y": 21,
+        "y": 24,
         "w": 12,
         "h": 8
       },
       "targets": [
         {
+          "refId": "A",
           "datasource": {
             "type": "prometheus",
             "uid": "${datasource}"
           },
-          "expr": "up",
-          "legendFormat": "{{job}}",
-          "refId": "A"
+          "expr": "up{instance=~\"$instance\"}",
+          "legendFormat": "{{job}} {{instance}}"
         }
       ],
       "fieldConfig": {
@@ -764,14 +631,10 @@
             "mode": "palette-classic"
           },
           "custom": {
-            "drawStyle": "line",
-            "lineWidth": 2,
-            "fillOpacity": 10,
+            "lineWidth": 1,
+            "fillOpacity": 0,
             "showPoints": "never",
-            "spanNulls": true,
-            "stacking": {
-              "mode": "none"
-            }
+            "gradientMode": "opacity"
           }
         },
         "overrides": []
@@ -779,11 +642,99 @@
       "options": {
         "legend": {
           "displayMode": "list",
-          "placement": "bottom"
+          "placement": "bottom",
+          "showLegend": true
         },
         "tooltip": {
-          "mode": "multi"
+          "mode": "multi",
+          "sort": "desc"
         }
+      }
+    },
+    {
+      "id": 11,
+      "type": "logs",
+      "title": "Logs backend (CloudWatch)",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "${cw}"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 32,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cw}"
+          },
+          "queryMode": "Logs",
+          "region": "eu-west-3",
+          "id": "",
+          "queryLanguage": "CWLI",
+          "logGroups": [
+            {
+              "arn": "arn:aws:logs:eu-west-3:636361171302:log-group:/ecs/voicecraft-prod/backend",
+              "name": "/ecs/voicecraft-prod/backend"
+            }
+          ],
+          "expression": "fields @timestamp, @message | filter @message not like /api\\/health/ | sort @timestamp desc | limit 100",
+          "statsGroups": []
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none"
+      }
+    },
+    {
+      "id": 12,
+      "type": "logs",
+      "title": "Logs frontend (CloudWatch)",
+      "datasource": {
+        "type": "cloudwatch",
+        "uid": "${cw}"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 32,
+        "w": 12,
+        "h": 10
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "cloudwatch",
+            "uid": "${cw}"
+          },
+          "queryMode": "Logs",
+          "region": "eu-west-3",
+          "id": "",
+          "queryLanguage": "CWLI",
+          "logGroups": [
+            {
+              "arn": "arn:aws:logs:eu-west-3:636361171302:log-group:/ecs/voicecraft-prod/frontend",
+              "name": "/ecs/voicecraft-prod/frontend"
+            }
+          ],
+          "expression": "fields @timestamp, @message | filter @message not like /api\\/health/ | sort @timestamp desc | limit 100",
+          "statsGroups": []
+        }
+      ],
+      "options": {
+        "showTime": true,
+        "wrapLogMessage": true,
+        "sortOrder": "Descending",
+        "enableLogDetails": true,
+        "dedupStrategy": "none"
       }
     }
   ]
