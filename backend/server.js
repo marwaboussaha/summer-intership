@@ -43,23 +43,33 @@ app.get("/api/metrics", async (_req, res) => {
   res.end(await client.register.metrics());
 });
 
+// ---------------------------------------------------------------------------
 // CORS restreint aux origines autorisées (au lieu de cors() ouvert à tous)
+// FRONTEND_URL peut contenir plusieurs origines séparées par des virgules, ex :
+//   https://voicecraft-plateform.website,https://app.voicecraft-plateform.website
+// Les requêtes de même origine (le site et l'API sur le même domaine) sont
+// toujours acceptées.
+// ---------------------------------------------------------------------------
 const allowedOrigins = [
   "http://localhost:5173", // front en dev (Vite)
-  process.env.FRONTEND_URL, // front en prod, ex: https://voicecraft.monapp.com
-].filter(Boolean);
+  ...(process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+];
 
 app.use(
-  cors({
-    origin: (origin, callback) => {
-      // origin est undefined pour les requêtes sans en-tête Origin (curl, mobile...)
-      if (!origin || allowedOrigins.includes(origin)) {
-        callback(null, true);
-      } else {
-        callback(new Error("Not allowed by CORS"));
-      }
-    },
-    credentials: true,
+  cors((req, callback) => {
+    const origin = req.header("Origin");
+    const host = req.header("X-Forwarded-Host") || req.header("Host");
+    const proto = req.header("X-Forwarded-Proto") || "https";
+    const sameOrigin = Boolean(origin && host && origin === `${proto}://${host}`);
+
+    // origin est undefined pour les requêtes sans en-tête Origin (curl, mobile...)
+    if (!origin || sameOrigin || allowedOrigins.includes(origin)) {
+      return callback(null, { origin: true, credentials: true });
+    }
+    return callback(new Error("Not allowed by CORS"));
   })
 );
 
@@ -93,6 +103,18 @@ connectDB();
 app.use("/api/auth", authRoutes);
 app.use("/api", generateRouter);
 app.use("/api", exportPdfRouter); // ⭐ /api/export-pdf
+
+// ---------------------------------------------------------------------------
+// Gestion d'erreurs : toujours répondre en JSON (jamais la page HTML d'Express)
+// ---------------------------------------------------------------------------
+app.use((err, _req, res, _next) => {
+  if (err && err.message === "Not allowed by CORS") {
+    return res.status(403).json({ error: "Origine non autorisée" });
+  }
+  console.error("Erreur serveur :", sanitizeForLog(err && err.message));
+  const status = err && Number.isInteger(err.status) ? err.status : 500;
+  res.status(status).json({ error: "Une erreur interne est survenue." });
+});
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
