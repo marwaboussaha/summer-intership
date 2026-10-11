@@ -3,6 +3,6 @@ global:
 scrape_configs:
   - job_name: voicecraft-backend
     scheme: https
-    metrics_path: /metrics
+    metrics_path: /api/metrics
     static_configs:
       - targets: ["${APP_HOST}:443"]
