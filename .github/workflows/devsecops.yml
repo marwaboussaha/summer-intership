@@ -444,12 +444,15 @@ jobs:
   ##########################################################################
   # 10. DAST - OWASP ZAP contre l'application deployee
   #
-  # La cible n'est plus un cluster de staging mais le DNS public de l'ALB,
-  # expose en HTTP (pas de nom de domaine ni de certificat dans cette
-  # version de l'infrastructure).
+  # La cible est l'URL publique de l'application (variable APP_URL, en HTTPS
+  # derriere l'ALB).
   #
   # continue-on-error : l'infrastructure est detruite hors demonstration
   # pour maitriser les couts, l'URL n'est donc pas toujours joignable.
+  #
+  # Correction : "-l HIGH" n'est pas une valeur valide pour zap-baseline.py
+  # (valeurs acceptees : PASS, IGNORE, INFO, WARN, FAIL). Il provoquait un
+  # exit code 3 (erreur d'arguments) avant meme le debut du scan.
   ##########################################################################
   dast-owasp-zap:
     runs-on: ubuntu-latest
@@ -458,6 +461,8 @@ jobs:
     continue-on-error: true
     timeout-minutes: 30
     steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
       - name: Verifier que l'application repond
         id: check
         env:
@@ -484,8 +489,9 @@ jobs:
         with:
           target: ${{ vars.APP_URL }}
           rules_file_name: ".zap/rules.tsv"
-          cmd_options: "-l HIGH"
+          cmd_options: "-l WARN"
           allow_issue_writing: false
+          fail_action: false
 
       - name: Sauvegarder le rapport ZAP
         if: always()
@@ -496,5 +502,99 @@ jobs:
             report_html.html
             report_md.md
             report_json.json
+          if-no-files-found: warn
+          retention-days: 5
+
+  ##########################################################################
+  # 11. MONITORING - Prometheus + Grafana (validation contre l'app deployee)
+  #
+  # Le runner GitHub est ephemere : ce job ne remplace pas une supervision
+  # permanente (a deployer via Terraform). Il verifie que :
+  #   - la config Prometheus est valide (promtool) ;
+  #   - Prometheus et Grafana demarrent ;
+  #   - Prometheus arrive a lire <APP_URL>/metrics (backend avec prom-client).
+  # Si /metrics n'existe pas encore, la cible est DOWN : simple avertissement.
+  #
+  # Fichiers requis dans le repo :
+  #   monitoring/prometheus.yml.tpl
+  #   monitoring/grafana/datasource.yml
+  ##########################################################################
+  monitoring-check:
+    runs-on: ubuntu-latest
+    needs: dast-owasp-zap
+    if: ${{ !cancelled() && github.event_name != 'pull_request' && vars.AWS_DEPLOY_ROLE_ARN != '' }}
+    continue-on-error: true
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Generer la config Prometheus
+        id: cfg
+        env:
+          APP_URL: ${{ vars.APP_URL }}
+        run: |
+          set -euo pipefail
+          if [ -z "${APP_URL}" ]; then
+            echo "::warning::APP_URL non defini, monitoring ignore."
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          export APP_HOST="$(echo "${APP_URL}" | sed -E 's#^https?://##; s#/.*$##')"
+          envsubst < monitoring/prometheus.yml.tpl > monitoring/prometheus.yml
+          cat monitoring/prometheus.yml
+          echo "ready=true" >> "$GITHUB_OUTPUT"
+
+      - name: Valider la config avec promtool
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/monitoring:/cfg" --entrypoint promtool \
+            prom/prometheus:v2.55.1 check config /cfg/prometheus.yml
+
+      - name: Demarrer Prometheus et Grafana
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          set -euo pipefail
+          docker network create mon
+          docker run -d --name prometheus --network mon -p 9090:9090 \
+            -v "$PWD/monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro" \
+            prom/prometheus:v2.55.1
+          docker run -d --name grafana --network mon -p 3000:3000 \
+            -e GF_SECURITY_ADMIN_PASSWORD="$(openssl rand -hex 16)" \
+            -v "$PWD/monitoring/grafana/datasource.yml:/etc/grafana/provisioning/datasources/datasource.yml:ro" \
+            grafana/grafana:11.3.0
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:9090/-/ready >/dev/null 2>&1 \
+               && curl -fsS http://localhost:3000/api/health >/dev/null 2>&1; then
+              echo "Prometheus et Grafana prets."
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::Prometheus ou Grafana n'a pas demarre."
+          docker logs prometheus || true
+          docker logs grafana || true
+          exit 1
+
+      - name: Verifier que Prometheus lit l'application
+        if: steps.cfg.outputs.ready == 'true'
+        run: |
+          set -uo pipefail
+          sleep 40   # deux cycles de scrape
+          curl -fsS http://localhost:3000/api/health
+          curl -fsS "http://localhost:9090/api/v1/targets" > targets.json
+          cat targets.json
+          if grep -q '"health":"up"' targets.json; then
+            echo "Cible backend UP : metriques lues."
+          else
+            echo "::warning::Cible backend DOWN : /metrics absent ou inaccessible."
+          fi
+
+      - name: Sauvegarder le resultat
+        if: always() && steps.cfg.outputs.ready == 'true'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: monitoring-check
+          path: targets.json
           if-no-files-found: warn
           retention-days: 5
