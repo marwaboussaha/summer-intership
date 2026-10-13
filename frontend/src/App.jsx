@@ -57,7 +57,6 @@ export default function App() {
 
   const [draft, setDraft] = useState("");
   const [isListening, setIsListening] = useState(false);
-  const [micError, setMicError] = useState(null);
   const recognitionRef = useRef(null);
 
   const [attachedFile, setAttachedFile] = useState(null); // { name, size, content }
@@ -66,24 +65,7 @@ export default function App() {
   // Reconnaissance vocale légère pour le champ de saisie de la hero section.
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    // ⭐ CORRECTION : l'API Web Speech n'est disponible que sur les navigateurs
-    // basés Chromium (Chrome, Edge, Opera). Firefox ne l'implémente pas du
-    // tout, Safari l'implémente partiellement. On affiche désormais un
-    // message clair au lieu de laisser le bouton silencieusement inactif.
-    if (!SpeechRecognition) {
-      setMicError(
-        "La dictée vocale n'est pas supportée par ce navigateur (utilisez Chrome ou Edge)."
-      );
-      return;
-    }
-
-    // ⭐ CORRECTION : l'API Web Speech exige un contexte sécurisé (HTTPS ou
-    // localhost). Si la page est servie en HTTP, start() échoue silencieusement.
-    if (!window.isSecureContext) {
-      setMicError("La dictée vocale nécessite une connexion HTTPS.");
-      return;
-    }
+    if (!SpeechRecognition) return;
 
     const recognition = new SpeechRecognition();
     recognition.lang = "fr-FR";
@@ -93,27 +75,9 @@ export default function App() {
     recognition.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
       setDraft((prev) => (prev ? `${prev} ${transcript}` : transcript).slice(0, MAX_CHARS));
-      setMicError(null);
     };
     recognition.onend = () => setIsListening(false);
-
-    // ⭐ CORRECTION MAJEURE : l'erreur était avalée en silence
-    // (`onerror = () => setIsListening(false)`), donc impossible de savoir
-    // pourquoi le micro ne captait rien (permission refusée, pas de réseau,
-    // pas de son détecté...). On journalise et on affiche le vrai motif.
-    recognition.onerror = (event) => {
-      console.error("SpeechRecognition error:", event.error);
-      setIsListening(false);
-
-      const messages = {
-        "not-allowed": "Micro bloqué : autorisez l'accès au micro pour ce site dans les paramètres du navigateur.",
-        "service-not-allowed": "Micro bloqué : autorisez l'accès au micro pour ce site dans les paramètres du navigateur.",
-        "no-speech": "Aucune voix détectée, réessayez en parlant juste après avoir cliqué sur le micro.",
-        "audio-capture": "Aucun microphone détecté sur cet appareil.",
-        network: "Erreur réseau pendant la reconnaissance vocale (le service Google Speech n'a pas pu être contacté).",
-      };
-      setMicError(messages[event.error] || `Erreur de reconnaissance vocale : ${event.error}`);
-    };
+    recognition.onerror = () => setIsListening(false);
 
     recognitionRef.current = recognition;
   }, []);
@@ -137,16 +101,8 @@ export default function App() {
       recognitionRef.current.stop();
       setIsListening(false);
     } else {
-      setMicError(null);
-      try {
-        recognitionRef.current.start();
-        setIsListening(true);
-      } catch (err) {
-        // ⭐ start() lève une exception si appelé deux fois de suite trop vite
-        // (déjà en cours) — on l'affiche au lieu de la laisser silencieuse.
-        console.error("SpeechRecognition.start() failed:", err);
-        setMicError(err.message);
-      }
+      recognitionRef.current.start();
+      setIsListening(true);
     }
   };
 
@@ -412,10 +368,6 @@ export default function App() {
 
         {status === "error" && error && (
           <p className="hero-input__error">{error}</p>
-        )}
-
-        {micError && (
-          <p className="hero-input__error">🎙️ {micError}</p>
         )}
 
         {/* ⭐ Étape 04 (Consultation Live) : message + redirection vers l'app générée.
