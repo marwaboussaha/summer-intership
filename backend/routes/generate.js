@@ -2,58 +2,10 @@ import express from "express";
 import { generateCode } from "../services/groqService.js";
 import { writeSandboxFiles, copyTemplateFiles } from "../sandbox/services/fileWriter.js";
 import { launchSandbox } from "../sandbox/services/dockerRunner.js";
+// ⭐ MODIFIÉ : la validation vit désormais dans son propre module, partagé et testable.
 import { isValidSandboxId, createSandboxId } from "../utils/sandboxId.js";
 
 const router = express.Router();
-
-// Sur ECS Fargate il n'y a pas de Docker : on n'écrit rien sur disque et on
-// ne lance aucun conteneur. L'aperçu est une page HTML autonome renvoyée
-// sous forme de data: URL (sans état serveur : fonctionne avec plusieurs
-// tâches derrière l'ALB) et aussi dans le champ "html" (pour un iframe srcdoc).
-const SANDBOX_DISABLED =
-  process.env.SANDBOX_MODE === "disabled" ||
-  Boolean(process.env.ECS_CONTAINER_METADATA_URI_V4);
-
-// Fusionne les fichiers existants (envoyés par le client) et les fichiers
-// renvoyés par le modèle, puis retourne le HTML complet de la page.
-function buildStaticHtml(existing, generated) {
-  const files = new Map();
-  for (const f of Array.isArray(existing) ? existing : []) {
-    if (f && typeof f.path === "string" && typeof f.content === "string") {
-      files.set(f.path, f.content);
-    }
-  }
-  for (const f of Array.isArray(generated) ? generated : []) {
-    if (f && typeof f.path === "string" && typeof f.content === "string") {
-      files.set(f.path, f.content);
-    }
-  }
-
-  let entry =
-    files.has("index.html")
-      ? "index.html"
-      : [...files.keys()].find((p) => p.toLowerCase().endsWith(".html"));
-  if (!entry) return null;
-
-  let html = files.get(entry);
-
-  // Inline les éventuels CSS/JS séparés générés par le modèle.
-  html = html.replace(
-    /<link[^>]+href=["']([^"']+\.css)["'][^>]*>/gi,
-    (m, href) => {
-      const css = files.get(href.replace(/^\.?\//, ""));
-      return css !== undefined ? `<style>${css}</style>` : m;
-    }
-  );
-  html = html.replace(
-    /<script[^>]+src=["']([^"']+\.js)["'][^>]*>\s*<\/script>/gi,
-    (m, src) => {
-      const js = files.get(src.replace(/^\.?\//, ""));
-      return js !== undefined ? `<script>${js}</script>` : m;
-    }
-  );
-  return html;
-}
 
 // POST /api/generate
 router.post("/generate", async (req, res) => {
@@ -62,13 +14,16 @@ router.post("/generate", async (req, res) => {
       userText,
       projectContext,
       file,
-      sandboxId: incomingSandboxId,
+      sandboxId: incomingSandboxId, // ⭐ présent = on ajuste une sandbox existante
     } = req.body;
 
     if (!userText) {
       return res.status(400).json({ error: "userText manquant dans la requête" });
     }
 
+    // ⭐ Validation du sandboxId fourni par le client AVANT toute utilisation.
+    // Bloque l'injection de commande, le path traversal (../, /, \) ET
+    // l'injection d'argument (identifiant commençant par un tiret).
     if (incomingSandboxId && !isValidSandboxId(incomingSandboxId)) {
       return res.status(400).json({ error: "sandboxId invalide" });
     }
@@ -76,38 +31,41 @@ router.post("/generate", async (req, res) => {
     const isIteration = Boolean(incomingSandboxId);
     const sandboxId = incomingSandboxId || createSandboxId();
 
+    // Étapes 6 + 7 : construction du prompt + appel Groq
+    // (le contexte, s'il contient existingFilesContent, déclenche le mode
+    // "modify" côté prompt — voir groqService.js)
     const result = await generateCode(userText, projectContext, file);
 
     if (result.error) {
       return res.status(200).json(result);
     }
 
-    if (SANDBOX_DISABLED) {
-      const html = buildStaticHtml(
-        projectContext?.existingFilesContent,
-        result.files
-      );
-      const previewUrl = html
-        ? `data:text/html;charset=utf-8;base64,${Buffer.from(html, "utf-8").toString("base64")}`
-        : null;
-
+    // ⭐ Étape 03/05 : écriture des fichiers.
+    // En itération, le dossier sandboxId existe déjà : on n'écrit QUE les
+    // fichiers renvoyés par Groq (modifiés/ajoutés), les autres restent
+    // intacts sur le disque — c'est ça, l'injection différentielle.
+    // En production (ECS Fargate), il n'y a pas de demon Docker : on renvoie
+// directement le code genere, sans ecrire de fichiers ni lancer de sandbox.
+    const sandboxDisabled =
+      process.env.SANDBOX_MODE === "disabled" ||
+      Boolean(process.env.ECS_CONTAINER_METADATA_URI_V4);
+    if (sandboxDisabled) {
       return res.json({
         ...result,
         sandboxId,
-        html,
         sandbox: {
           id: sandboxId,
           url: null,
           port: null,
           hotReload: false,
-          previewUrl,
+          previewUrl: null,
           disabled: true,
         },
       });
     }
 
     const sandboxPath = await writeSandboxFiles(sandboxId, result.files);
-    await copyTemplateFiles(sandboxPath);
+    await copyTemplateFiles(sandboxPath); // no-op si déjà présent (force:false)
 
     const { url, port, hotReload } = await launchSandbox(sandboxId, {
       isIteration,
@@ -121,13 +79,18 @@ router.post("/generate", async (req, res) => {
         id: sandboxId,
         url,
         port,
-        hotReload,
+        hotReload, // ⭐ true si c'est une injection à chaud sur le conteneur déjà actif
         previewUrl: `${url}${result.entryRoute || "/"}${
           (result.entryRoute || "/").includes("?") ? "&" : "?"
         }v=${Date.now()}`
       }
     });
   } catch (err) {
+    // ⭐ On ne logue jamais err.message ni err.stack bruts : tous deux peuvent
+    // contenir des données contrôlées par l'utilisateur (une valeur invalide
+    // réapparaît souvent dans le message d'erreur) → log injection / log forging.
+    // On logue le type d'erreur et la première ligne de code de la stack, qui
+    // suffisent au diagnostic, et on renvoie une erreur générique au client.
     const origin = String(err?.stack || "")
       .split("\n")
       .find((line) => line.trim().startsWith("at ")) || "origine inconnue";
