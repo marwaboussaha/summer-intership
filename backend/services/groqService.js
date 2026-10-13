@@ -10,8 +10,8 @@ const groq = new OpenAI({
   baseURL: "https://api.groq.com/openai/v1"
 });
 
-const TEXT_MODEL = "llama-3.3-70b-versatile";
-const VISION_MODEL = "qwen/qwen3.6-27b"; // modèle Groq capable d'analyser des images
+const TEXT_MODEL = "openai/gpt-oss-120b";
+const VISION_MODEL = "qwen/qwen3.8-27b"; // modèle Groq capable d'analyser des images
 
 // ─────────────────────────────────────────────
 // System prompt commun aux deux modes (texte seul / avec image)
