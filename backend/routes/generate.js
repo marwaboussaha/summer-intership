@@ -44,6 +44,26 @@ router.post("/generate", async (req, res) => {
     // En itération, le dossier sandboxId existe déjà : on n'écrit QUE les
     // fichiers renvoyés par Groq (modifiés/ajoutés), les autres restent
     // intacts sur le disque — c'est ça, l'injection différentielle.
+    // En production (ECS Fargate), il n'y a pas de demon Docker : on renvoie
+// directement le code genere, sans ecrire de fichiers ni lancer de sandbox.
+    const sandboxDisabled =
+      process.env.SANDBOX_MODE === "disabled" ||
+      Boolean(process.env.ECS_CONTAINER_METADATA_URI_V4);
+    if (sandboxDisabled) {
+      return res.json({
+        ...result,
+        sandboxId,
+        sandbox: {
+          id: sandboxId,
+          url: null,
+          port: null,
+          hotReload: false,
+          previewUrl: null,
+          disabled: true,
+        },
+      });
+    }
+
     const sandboxPath = await writeSandboxFiles(sandboxId, result.files);
     await copyTemplateFiles(sandboxPath); // no-op si déjà présent (force:false)
 
