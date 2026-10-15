@@ -260,6 +260,23 @@ export default function App() {
   // les téléchargements de fichiers binaires, sans aucune manipulation
   // JavaScript intermédiaire pouvant corrompre les données.
   const handleDownloadPdf = () => {
+    if (previewHtml) {
+      // Impression locale (Enregistrer au format PDF) : iframe sans scripts.
+      const printFrame = document.createElement("iframe");
+      printFrame.setAttribute("sandbox", "allow-same-origin allow-modals");
+      printFrame.style.cssText = "position:fixed;right:0;bottom:0;width:1024px;height:768px;border:0;opacity:0;pointer-events:none;";
+      printFrame.srcdoc = previewHtml;
+      printFrame.onload = () => {
+        try {
+          printFrame.contentWindow.focus();
+          printFrame.contentWindow.print();
+        } finally {
+          setTimeout(() => printFrame.remove(), 60000);
+        }
+      };
+      document.body.appendChild(printFrame);
+      return;
+    }
     if (!result?.sandbox?.url || !result?.entryRoute) return;
 
     const cleanUrl = `${result.sandbox.url}${result.entryRoute}`;
