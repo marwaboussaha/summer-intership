@@ -616,6 +616,17 @@ export default function App() {
           </div>
         )}
 
+        {/* 1) La page générée */}
+        {status === "done" && previewHtml && (
+          <iframe
+            title="Apercu de l'application generee"
+            srcDoc={previewHtml}
+            sandbox="allow-scripts allow-forms allow-modals"
+            style={{ width: "100%", maxWidth: 1100, height: 560, border: "1px solid #334155", borderRadius: 12, background: "#fff", marginTop: 16 }}
+          />
+        )}
+
+        {/* 2) Le dossier du site (ZIP), en dessous de la page */}
         {status === "done" && previewHtml && (
           <div className="hero-sandbox-ready" style={{ marginTop: 16 }}>
             <div className="hero-sandbox-ready__text">
@@ -631,15 +642,6 @@ export default function App() {
               📦 Télécharger le dossier (.zip)
             </button>
           </div>
-        )}
-
-        {status === "done" && previewHtml && (
-          <iframe
-            title="Apercu de l'application generee"
-            srcDoc={previewHtml}
-            sandbox="allow-scripts allow-forms allow-modals"
-            style={{ width: "100%", maxWidth: 1100, height: 560, border: "1px solid #334155", borderRadius: 12, background: "#fff", marginTop: 16 }}
-          />
         )}
 
         <div className="hero-suggestions">
