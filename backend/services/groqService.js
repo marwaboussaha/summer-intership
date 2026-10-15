@@ -146,10 +146,20 @@ function fixDoubleEscaping(result) {
   if (!result || !Array.isArray(result.files)) return;
   for (const f of result.files) {
     if (typeof f?.content !== "string") continue;
+
+    // \" -> "
     if (/=\\"/.test(f.content)) {
       f.content = f.content.replace(/\\"/g, '"');
     }
-    // \' dans le HTML (hors <script>) : entite HTML, sinon l'attribut est coupe.
+
+    // \n \t littéraux -> vrais retours à la ligne (si plus de \n littéraux que de vrais)
+    const literal = (f.content.match(/\\n/g) || []).length;
+    const real = (f.content.match(/\n/g) || []).length;
+    if (literal > real) {
+      f.content = f.content.replace(/\\r\\n|\\n/g, "\n").replace(/\\t/g, "\t");
+    }
+
+    // \' -> &#39; dans le HTML (hors <script>)
     if (/\.html?$/i.test(f.path || "")) {
       f.content = f.content
         .split(/(<script[\s\S]*?<\/script>)/i)
