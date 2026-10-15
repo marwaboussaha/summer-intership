@@ -597,11 +597,6 @@ export default function App() {
 
         {activeSandbox && (
           <div className="hero-iteration-bar">
-            <span>
-              🎙️ <strong>Pour modifier cette app :</strong> tapez votre demande
-              dans le champ ci-dessus (ex: "ajoute un bouton mot de passe oublié"),
-              puis cliquez sur "Appliquer la modification". Pas besoin d'autre chose.
-            </span>
             <button
               type="button"
               className="hero-iteration-bar__reset"
