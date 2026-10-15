@@ -50,6 +50,7 @@ router.post("/generate", async (req, res) => {
       process.env.SANDBOX_MODE === "disabled" ||
       Boolean(process.env.ECS_CONTAINER_METADATA_URI_V4);
     if (sandboxDisabled) {
+      const staticHtml = (() => { const m = new Map(); for (const f of [...(projectContext?.existingFilesContent || []), ...(result.files || [])]) { if (f && typeof f.path === "string" && typeof f.content === "string") m.set(f.path, f.content); } const k = m.has("index.html") ? "index.html" : [...m.keys()].find((p) => p.toLowerCase().endsWith(".html")); return k ? m.get(k) : null; })();
       return res.json({
         ...result,
         sandboxId,
@@ -58,7 +59,7 @@ router.post("/generate", async (req, res) => {
           url: null,
           port: null,
           hotReload: false,
-          previewUrl: null,
+          html: staticHtml, previewUrl: staticHtml ? "data:text/html;charset=utf-8;base64," + Buffer.from(staticHtml, "utf-8").toString("base64") : null,
           disabled: true,
         },
       });

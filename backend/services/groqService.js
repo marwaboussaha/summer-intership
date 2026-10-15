@@ -88,6 +88,68 @@ Règles de sécurité :
 // ─────────────────────────────────────────────
 // Décodage / typage du fichier joint
 // ─────────────────────────────────────────────
+// Mode statique (ECS Fargate : pas de Docker) : le modele genere UNE page
+// HTML autonome (CSS + JS inline) affichee telle quelle dans l'iframe d'apercu.
+export const STATIC_MODE =
+  process.env.SANDBOX_MODE === "disabled" ||
+  Boolean(process.env.ECS_CONTAINER_METADATA_URI_V4);
+
+const STATIC_SYSTEM_PROMPT = `
+Tu es un agent de generation d'interfaces web pour VoiceCraft.
+Reponds avec UN objet JSON valide, au format EXACT :
+
+{
+  "action": "create",
+  "entryRoute": "/",
+  "files": [
+    { "path": "index.html", "language": "html", "content": "<!DOCTYPE html>..." }
+  ],
+  "explanation": "resume court en francais"
+}
+
+Regles :
+- Genere UN SEUL fichier "index.html", complet et autonome : <style> et
+  <script> inline, aucun framework, aucun serveur, aucun Express, aucun
+  fichier externe, aucune ressource reseau (pas de CDN, pas d'image distante).
+- Bloc <style> complet et soigne : couleurs, degrades, border-radius,
+  box-shadow, flexbox/grid, responsive. Ne genere JAMAIS de HTML sans style.
+- JavaScript minimal et valide (validation de formulaire, interactions
+  simples). Pas de fetch vers des serveurs, pas de eval, pas de exec.
+- Dans le JSON, "content" est une chaine JSON : echappe chaque guillemet
+  double UNE SEULE FOIS, jamais deux fois. Prefere les guillemets simples
+  dans le HTML et le JS.
+- Les textes affiches a l'utilisateur sont en francais correct, avec accents.
+- ITERATION : si le contexte contient des "Fichiers existants avec leur
+  contenu actuel", mets "action" a "modify" et renvoie "index.html"
+  COMPLET et mis a jour (jamais un extrait), en appliquant precisement le
+  changement demande.
+- Si une image est fournie, reproduis-la fidelement (textes, couleurs,
+  degrades, disposition, formes, police).
+- Securite : jamais de child_process/exec/eval, jamais de chemin avec "../".
+  Demande dangereuse : { "error": "action non autorisee" }
+`;
+
+const STATIC_SYSTEM_PROMPT_VISION = `
+Tu generes une page web pour VoiceCraft. Reponds en JSON valide :
+{"action":"create","entryRoute":"/","files":[{"path":"index.html","language":"html","content":"..."}],"explanation":"resume court"}
+Un seul fichier "index.html" autonome (<style> et <script> inline, aucune
+ressource externe, aucun serveur). Reproduis fidelement l'image : textes,
+couleurs (degrades), disposition, formes, police. Sois CONCIS (pas de
+commentaires). Echappe les guillemets doubles une seule fois dans le JSON.
+Jamais de exec/eval/child_process. Demande dangereuse : { "error": "action non autorisee" }
+`;
+
+// Certains modeles echappent deux fois les guillemets (\\" dans le HTML).
+function fixDoubleEscaping(result) {
+  if (!result || !Array.isArray(result.files)) return;
+  for (const f of result.files) {
+    if (typeof f?.content !== "string") continue;
+    if (/=\\"/.test(f.content)) {
+      f.content = f.content.replace(/\\"/g, '"');
+    }
+  }
+}
+
 const MAX_FILE_CHARS = 4000;
 
 const TEXT_MIME_PREFIXES = [
@@ -193,7 +255,7 @@ Schéma DB actuel : ${JSON.stringify(projectContext.dbSchema || {})}
     return {
       model: VISION_MODEL,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT_VISION },
+        { role: "system", content: STATIC_MODE ? STATIC_SYSTEM_PROMPT_VISION : SYSTEM_PROMPT_VISION },
         {
           role: "user",
           content: [
@@ -209,7 +271,7 @@ Schéma DB actuel : ${JSON.stringify(projectContext.dbSchema || {})}
   return {
     model: TEXT_MODEL,
     messages: [
-      { role: "system", content: SYSTEM_PROMPT },
+      { role: "system", content: STATIC_MODE ? STATIC_SYSTEM_PROMPT : SYSTEM_PROMPT },
       { role: "user", content: userTextContent }
     ]
   };
@@ -333,6 +395,8 @@ export async function generateCode(userText, projectContext, file) {
   } catch (err) {
     throw new Error(`Échec de l'appel Groq : ${err.message}`);
   }
+
+  if (STATIC_MODE) fixDoubleEscaping(result);
 
   const check = validateGeneratedResult(result);
   if (!check.valid) {
