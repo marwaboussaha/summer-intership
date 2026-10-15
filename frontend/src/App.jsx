@@ -434,7 +434,7 @@ export default function App() {
               <p>{result.explanation || "Elle tourne dans une sandbox isolée, prête à tester."}</p>
             </div>
             <a
-              href={result.sandbox.previewUrl}
+              href={result.sandbox.previewUrl} hidden={Boolean(result.html)}
               target="_blank"
               rel="noopener noreferrer"
               className="hero-sandbox-ready__button"
@@ -479,6 +479,15 @@ export default function App() {
               🗑️ Abandonner et repartir à zéro
             </button>
           </div>
+        )}
+
+        {status === "done" && result?.html && (
+          <iframe
+            title="Apercu de l'application generee"
+            srcDoc={result.html}
+            sandbox="allow-scripts allow-forms allow-modals"
+            style={{ width: "100%", maxWidth: 1100, height: 560, border: "1px solid #334155", borderRadius: 12, background: "#fff", marginTop: 16 }}
+          />
         )}
 
         <div className="hero-suggestions">
