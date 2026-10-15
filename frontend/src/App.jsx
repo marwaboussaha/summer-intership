@@ -71,6 +71,47 @@ function createZip(entries) {
   return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
 }
 
+// Nom de base des fichiers du site, tiré du <title> de la page générée.
+function slugFromHtml(html) {
+  const m = /<title[^>]*>([\s\S]*?)<\/title>/i.exec(html || "");
+  const slug = (m ? m[1] : "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return slug || "page";
+}
+
+// Sépare la page générée en <nom>.html / <nom>.css / <nom>.js.
+function splitSiteFiles(html) {
+  const base = slugFromHtml(html);
+  let css = "";
+  let js = "";
+  let page = html;
+  page = page.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (_, c) => {
+    css += c.trim() + "\n\n";
+    return "";
+  });
+  page = page.replace(/<script(?![^>]*\bsrc=)[^>]*>([\s\S]*?)<\/script>/gi, (_, c) => {
+    js += c.trim() + "\n\n";
+    return "";
+  });
+  if (css) {
+    const link = `  <link rel="stylesheet" href="${base}.css">\n`;
+    page = page.includes("</head>") ? page.replace("</head>", link + "</head>") : link + page;
+  }
+  if (js) {
+    const tag = `  <script src="${base}.js"></script>\n`;
+    page = page.includes("</body>") ? page.replace("</body>", tag + "</body>") : page + "\n" + tag;
+  }
+  const files = [{ path: `${base}.html`, content: page.trim() + "\n" }];
+  if (css) files.push({ path: `${base}.css`, content: css });
+  if (js) files.push({ path: `${base}.js`, content: js });
+  return files;
+}
+
 const SUGGESTIONS = [
   "Une todo app avec React et Flask...",
   "Un chat temps réel avec WebSocket...",
@@ -115,9 +156,7 @@ export default function App() {
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null); // { action, files, explanation } renvoyé par Groq
 
-  // ⭐ Étape 05 : mémorise la sandbox active pour permettre l'ajustement
-  // vocal itératif (même conteneur/port réutilisés tant qu'on ne démarre
-  // pas un "nouveau projet").
+  // Mémorise la sandbox active pour permettre l'ajustement vocal itératif.
   const [activeSandbox, setActiveSandbox] = useState(null); // { id, port, files: [{path, content}] }
 
   const [draft, setDraft] = useState("");
@@ -132,10 +171,6 @@ export default function App() {
   useEffect(() => {
     const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
 
-    // ⭐ CORRECTION : l'API Web Speech n'est disponible que sur les navigateurs
-    // basés Chromium (Chrome, Edge, Opera). Firefox ne l'implémente pas du
-    // tout, Safari l'implémente partiellement. On affiche désormais un
-    // message clair au lieu de laisser le bouton silencieusement inactif.
     if (!SpeechRecognition) {
       setMicError(
         "La dictée vocale n'est pas supportée par ce navigateur (utilisez Chrome ou Edge)."
@@ -143,8 +178,6 @@ export default function App() {
       return;
     }
 
-    // ⭐ CORRECTION : l'API Web Speech exige un contexte sécurisé (HTTPS ou
-    // localhost). Si la page est servie en HTTP, start() échoue silencieusement.
     if (!window.isSecureContext) {
       setMicError("La dictée vocale nécessite une connexion HTTPS.");
       return;
@@ -162,10 +195,6 @@ export default function App() {
     };
     recognition.onend = () => setIsListening(false);
 
-    // ⭐ CORRECTION MAJEURE : l'erreur était avalée en silence
-    // (`onerror = () => setIsListening(false)`), donc impossible de savoir
-    // pourquoi le micro ne captait rien (permission refusée, pas de réseau,
-    // pas de son détecté...). On journalise et on affiche le vrai motif.
     recognition.onerror = (event) => {
       console.error("SpeechRecognition error:", event.error);
       setIsListening(false);
@@ -207,8 +236,6 @@ export default function App() {
         recognitionRef.current.start();
         setIsListening(true);
       } catch (err) {
-        // ⭐ start() lève une exception si appelé deux fois de suite trop vite
-        // (déjà en cours) — on l'affiche au lieu de la laisser silencieuse.
         console.error("SpeechRecognition.start() failed:", err);
         setMicError(err.message);
       }
@@ -259,8 +286,6 @@ export default function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           userText: trimmed,
-          // ⭐ Étape 05 : si une sandbox est déjà active, on l'indique au
-          // backend — ça déclenche le mode itération/modification.
           sandboxId: activeSandbox?.id,
           projectContext: {
             existingFiles: activeSandbox?.files?.map((f) => f.path) || [],
@@ -274,12 +299,24 @@ export default function App() {
         }),
       });
 
-      const data = await res.json();
+      // Lecture sûre : le serveur / WAF / ALB peut répondre en HTML (403, 413, 504...).
+      const raw = await res.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch {
+        if (res.status === 403) {
+          throw new Error("Requête bloquée par le pare-feu (403). Essayez avec une image plus petite.");
+        }
+        if (res.status === 413) {
+          throw new Error("Requête trop volumineuse (413). Réduisez la taille de l'image jointe.");
+        }
+        if (res.status === 502 || res.status === 503 || res.status === 504) {
+          throw new Error(`Le serveur a mis trop de temps à répondre (${res.status}). Réessayez.`);
+        }
+        throw new Error(`Réponse invalide du serveur (HTTP ${res.status}).`);
+      }
 
-      // ⭐ CORRECTION : le backend ne renvoie jamais de champ "success".
-      // En cas d'échec, groqService/generate.js renvoient soit un statut HTTP
-      // d'erreur (res.ok === false), soit { error: "..." } avec un statut 200
-      // (cas où le LLM lui-même a refusé une action non autorisée).
       if (!res.ok) {
         throw new Error(data.error || "Erreur inconnue du serveur.");
       }
@@ -289,9 +326,8 @@ export default function App() {
 
       setResult(data); // { action, files, explanation, sandboxId, sandbox }
 
-      // ⭐ Fusionne les fichiers modifiés/ajoutés avec ceux déjà connus,
-      // pour garder en mémoire l'état complet du projet côté front —
-      // nécessaire pour que la PROCHAINE itération vocale ait le bon contexte.
+      // Fusionne les fichiers modifiés/ajoutés avec ceux déjà connus,
+      // pour garder le bon contexte à la PROCHAINE itération.
       setActiveSandbox((prev) => {
         const previousFiles = prev?.files || [];
         const updatedPaths = new Set(data.files.map((f) => f.path));
@@ -316,42 +352,6 @@ export default function App() {
     setAttachedFile(null);
   };
 
-  // ⭐ Téléchargement de la page générée en PDF
-  // ⭐ CORRECTION MAJEURE : abandon de l'approche fetch() + Blob +
-  // createObjectURL, qui s'est révélée peu fiable (fichiers corrompus).
-  // On laisse maintenant le navigateur télécharger directement l'URL,
-  // en s'appuyant sur l'en-tête "Content-Disposition: attachment" déjà
-  // renvoyé par le serveur — c'est la méthode native et éprouvée pour
-  // les téléchargements de fichiers binaires, sans aucune manipulation
-  // JavaScript intermédiaire pouvant corrompre les données.
-  const handleDownloadPdf = () => {
-    if (previewHtml) {
-      // Impression locale (Enregistrer au format PDF) : iframe sans scripts.
-      const printFrame = document.createElement("iframe");
-      printFrame.setAttribute("sandbox", "allow-same-origin allow-modals");
-      printFrame.style.cssText = "position:fixed;right:0;bottom:0;width:1024px;height:768px;border:0;opacity:0;pointer-events:none;";
-      printFrame.srcdoc = previewHtml;
-      printFrame.onload = () => {
-        try {
-          printFrame.contentWindow.focus();
-          printFrame.contentWindow.print();
-        } finally {
-          setTimeout(() => printFrame.remove(), 60000);
-        }
-      };
-      document.body.appendChild(printFrame);
-      return;
-    }
-    if (!result?.sandbox?.url || !result?.entryRoute) return;
-
-    const cleanUrl = `${result.sandbox.url}${result.entryRoute}`;
-    const exportUrl = `${BACKEND_URL}/api/export-pdf?url=${encodeURIComponent(cleanUrl)}`;
-
-    // Navigation directe : le navigateur gère lui-même le téléchargement
-    // binaire, sans passer par un Blob JavaScript intermédiaire.
-    window.location.href = exportUrl;
-  };
-
   // Page HTML à afficher : renvoyée par le backend, sinon prise dans les fichiers générés.
   const previewHtml = result?.html || (() => {
     const files = activeSandbox?.files || result?.files || [];
@@ -359,8 +359,16 @@ export default function App() {
     return page?.content || null;
   })();
 
-  // Dossier du site généré (nom + fichiers) et téléchargement en ZIP.
-  const projectFiles = (activeSandbox?.files?.length ? activeSandbox.files : result?.files) || [];
+  // Dossier du site généré : code de la page séparé en .html / .css / .js
+  // (+ éventuels autres fichiers non-HTML renvoyés par le modèle).
+  const rawFiles = (activeSandbox?.files?.length ? activeSandbox.files : result?.files) || [];
+  const projectFiles = (() => {
+    if (!previewHtml) return rawFiles;
+    const split = splitSiteFiles(previewHtml);
+    const taken = new Set(split.map((f) => f.path));
+    const others = rawFiles.filter((f) => !/\.html?$/i.test(f.path || "") && !taken.has(f.path));
+    return [...split, ...others];
+  })();
   const projectFolder = `site-${String(activeSandbox?.id || result?.sandboxId || "voicecraft").slice(-8)}`;
 
   const handleDownloadZip = () => {
@@ -378,12 +386,41 @@ export default function App() {
     setTimeout(() => URL.revokeObjectURL(url), 10000);
   };
 
+  // Téléchargement de la page générée en PDF (impression locale du HTML).
+  const handleDownloadPdf = () => {
+    if (previewHtml) {
+      const printFrame = document.createElement("iframe");
+      printFrame.setAttribute("sandbox", "allow-same-origin allow-modals");
+      printFrame.style.cssText =
+        "position:fixed;right:0;bottom:0;width:1024px;height:768px;border:0;opacity:0;pointer-events:none;";
+      const printCss =
+        "<style>@page{margin:0}*{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}</style>";
+      printFrame.srcdoc = previewHtml.includes("</head>")
+        ? previewHtml.replace("</head>", printCss + "</head>")
+        : printCss + previewHtml;
+
+      printFrame.onload = () => {
+        try {
+          printFrame.contentWindow.focus();
+          printFrame.contentWindow.print();
+        } finally {
+          setTimeout(() => printFrame.remove(), 60000);
+        }
+      };
+      document.body.appendChild(printFrame);
+      return;
+    }
+    if (!result?.sandbox?.url || !result?.entryRoute) return;
+
+    const cleanUrl = `${result.sandbox.url}${result.entryRoute}`;
+    const exportUrl = `${BACKEND_URL}/api/export-pdf?url=${encodeURIComponent(cleanUrl)}`;
+    window.location.href = exportUrl;
+  };
+
   const handleSuggestionClick = (suggestion) => {
     setDraft(suggestion.replace(/\.\.\.$/, ""));
   };
 
-  // Redirige vers la connexion (la page de login propose elle-même le lien
-  // "Première fois ? Créer un compte" pour les nouveaux utilisateurs).
   const handleConnexionClick = () => {
     navigate("/login");
   };
@@ -526,8 +563,6 @@ export default function App() {
           <p className="hero-input__error">🎙️ {micError}</p>
         )}
 
-        {/* ⭐ Étape 04 (Consultation Live) : message + redirection vers l'app générée.
-            C'est le seul retour affiché après une génération réussie. */}
         {status === "done" && (result?.sandbox?.previewUrl || previewHtml) && (
           <div className="hero-sandbox-ready">
             <div className="hero-sandbox-ready__icon">
@@ -560,9 +595,6 @@ export default function App() {
           </div>
         )}
 
-        {/* ⭐ Étape 05 (Ajustement Vocal) : indique le mode itération et
-            permet, si vraiment voulu, d'abandonner ce projet pour repartir
-            de zéro sur quelque chose de différent. */}
         {activeSandbox && (
           <div className="hero-iteration-bar">
             <span>
