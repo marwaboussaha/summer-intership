@@ -6,6 +6,71 @@ const BACKEND_URL = "";
 const MAX_CHARS = 500;
 const MAX_FILE_SIZE = 5 * 1024 * 1024;
 
+// Génère un ZIP (méthode "stored", sans compression) sans dépendance externe.
+const CRC_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let n = 0; n < 256; n++) {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    t[n] = c >>> 0;
+  }
+  return t;
+})();
+
+const crc32 = (bytes) => {
+  let c = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) c = CRC_TABLE[(c ^ bytes[i]) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+};
+
+function createZip(entries) {
+  const enc = new TextEncoder();
+  const chunks = [];
+  const central = [];
+  let offset = 0;
+  for (const { path, content } of entries) {
+    const name = enc.encode(path);
+    const data = enc.encode(content);
+    const crc = crc32(data);
+    const local = new DataView(new ArrayBuffer(30));
+    local.setUint32(0, 0x04034b50, true);
+    local.setUint16(4, 20, true);
+    local.setUint16(6, 0x0800, true);
+    local.setUint16(8, 0, true);
+    local.setUint16(10, 0, true);
+    local.setUint16(12, 0x21, true);
+    local.setUint32(14, crc, true);
+    local.setUint32(18, data.length, true);
+    local.setUint32(22, data.length, true);
+    local.setUint16(26, name.length, true);
+    local.setUint16(28, 0, true);
+    chunks.push(new Uint8Array(local.buffer), name, data);
+    const cen = new DataView(new ArrayBuffer(46));
+    cen.setUint32(0, 0x02014b50, true);
+    cen.setUint16(4, 20, true);
+    cen.setUint16(6, 20, true);
+    cen.setUint16(8, 0x0800, true);
+    cen.setUint16(10, 0, true);
+    cen.setUint16(12, 0, true);
+    cen.setUint16(14, 0x21, true);
+    cen.setUint32(16, crc, true);
+    cen.setUint32(20, data.length, true);
+    cen.setUint32(24, data.length, true);
+    cen.setUint16(28, name.length, true);
+    cen.setUint32(42, offset, true);
+    central.push(new Uint8Array(cen.buffer), name);
+    offset += 30 + name.length + data.length;
+  }
+  const centralSize = central.reduce((s, c) => s + c.length, 0);
+  const end = new DataView(new ArrayBuffer(22));
+  end.setUint32(0, 0x06054b50, true);
+  end.setUint16(8, entries.length, true);
+  end.setUint16(10, entries.length, true);
+  end.setUint32(12, centralSize, true);
+  end.setUint32(16, offset, true);
+  return new Blob([...chunks, ...central, new Uint8Array(end.buffer)], { type: "application/zip" });
+}
+
 const SUGGESTIONS = [
   "Une todo app avec React et Flask...",
   "Un chat temps réel avec WebSocket...",
@@ -287,11 +352,31 @@ export default function App() {
     window.location.href = exportUrl;
   };
 
+  // Page HTML à afficher : renvoyée par le backend, sinon prise dans les fichiers générés.
   const previewHtml = result?.html || (() => {
     const files = activeSandbox?.files || result?.files || [];
     const page = files.find((x) => x.path === "index.html") || files.find((x) => /\.html?$/i.test(x.path));
     return page?.content || null;
   })();
+
+  // Dossier du site généré (nom + fichiers) et téléchargement en ZIP.
+  const projectFiles = (activeSandbox?.files?.length ? activeSandbox.files : result?.files) || [];
+  const projectFolder = `site-${String(activeSandbox?.id || result?.sandboxId || "voicecraft").slice(-8)}`;
+
+  const handleDownloadZip = () => {
+    if (projectFiles.length === 0) return;
+    const blob = createZip(
+      projectFiles.map((f) => ({ path: `${projectFolder}/${f.path}`, content: f.content || "" }))
+    );
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${projectFolder}.zip`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  };
 
   const handleSuggestionClick = (suggestion) => {
     setDraft(suggestion.replace(/\.\.\.$/, ""));
@@ -500,6 +585,23 @@ export default function App() {
               title="Abandonne ce projet et repart sur une application complètement différente"
             >
               🗑️ Abandonner et repartir à zéro
+            </button>
+          </div>
+        )}
+
+        {status === "done" && previewHtml && (
+          <div className="hero-sandbox-ready" style={{ marginTop: 16 }}>
+            <div className="hero-sandbox-ready__text">
+              <strong>📁 Dossier du site : {projectFolder}/</strong>
+              <p>{projectFiles.map((f) => f.path).join(", ")}</p>
+            </div>
+            <button
+              type="button"
+              className="hero-sandbox-ready__pdf-button"
+              onClick={handleDownloadZip}
+              title="Télécharger les fichiers du site dans un dossier ZIP"
+            >
+              📦 Télécharger le dossier (.zip)
             </button>
           </div>
         )}
