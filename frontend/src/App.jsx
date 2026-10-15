@@ -270,6 +270,12 @@ export default function App() {
     window.location.href = exportUrl;
   };
 
+  const previewHtml = result?.html || (() => {
+    const files = activeSandbox?.files || result?.files || [];
+    const page = files.find((x) => x.path === "index.html") || files.find((x) => /\.html?$/i.test(x.path));
+    return page?.content || null;
+  })();
+
   const handleSuggestionClick = (suggestion) => {
     setDraft(suggestion.replace(/\.\.\.$/, ""));
   };
@@ -420,7 +426,7 @@ export default function App() {
 
         {/* ⭐ Étape 04 (Consultation Live) : message + redirection vers l'app générée.
             C'est le seul retour affiché après une génération réussie. */}
-        {status === "done" && result?.sandbox?.previewUrl && (
+        {status === "done" && (result?.sandbox?.previewUrl || previewHtml) && (
           <div className="hero-sandbox-ready">
             <div className="hero-sandbox-ready__icon">
               {result.sandbox.hotReload ? "🔥" : "✅"}
@@ -434,7 +440,7 @@ export default function App() {
               <p>{result.explanation || "Elle tourne dans une sandbox isolée, prête à tester."}</p>
             </div>
             <a
-              href={result.sandbox.previewUrl} hidden={Boolean(result.html)}
+              href={result.sandbox.previewUrl} hidden={Boolean(previewHtml)}
               target="_blank"
               rel="noopener noreferrer"
               className="hero-sandbox-ready__button"
@@ -481,10 +487,10 @@ export default function App() {
           </div>
         )}
 
-        {status === "done" && result?.html && (
+        {status === "done" && previewHtml && (
           <iframe
             title="Apercu de l'application generee"
-            srcDoc={result.html}
+            srcDoc={previewHtml}
             sandbox="allow-scripts allow-forms allow-modals"
             style={{ width: "100%", maxWidth: 1100, height: 560, border: "1px solid #334155", borderRadius: 12, background: "#fff", marginTop: 16 }}
           />
