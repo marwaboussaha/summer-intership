@@ -116,8 +116,10 @@ Regles :
 - JavaScript minimal et valide (validation de formulaire, interactions
   simples). Pas de fetch vers des serveurs, pas de eval, pas de exec.
 - Dans le JSON, "content" est une chaine JSON : echappe chaque guillemet
-  double UNE SEULE FOIS, jamais deux fois. Prefere les guillemets simples
-  dans le HTML et le JS.
+  double UNE SEULE FOIS, jamais deux fois. N'ecris JAMAIS de backslash
+  devant une apostrophe : ecris Nom d'utilisateur tel quel. Dans le HTML,
+  mets les attributs entre guillemets doubles ; dans le JS, utilise des
+  backticks pour les chaines qui contiennent une apostrophe.
 - Les textes affiches a l'utilisateur sont en francais correct, avec accents.
 - ITERATION : si le contexte contient des "Fichiers existants avec leur
   contenu actuel", mets "action" a "modify" et renvoie "index.html"
@@ -139,13 +141,20 @@ commentaires). Echappe les guillemets doubles une seule fois dans le JSON.
 Jamais de exec/eval/child_process. Demande dangereuse : { "error": "action non autorisee" }
 `;
 
-// Certains modeles echappent deux fois les guillemets (\\" dans le HTML).
+// Certains modeles echappent mal les guillemets / apostrophes dans le HTML.
 function fixDoubleEscaping(result) {
   if (!result || !Array.isArray(result.files)) return;
   for (const f of result.files) {
     if (typeof f?.content !== "string") continue;
     if (/=\\"/.test(f.content)) {
       f.content = f.content.replace(/\\"/g, '"');
+    }
+    // \' dans le HTML (hors <script>) : entite HTML, sinon l'attribut est coupe.
+    if (/\.html?$/i.test(f.path || "")) {
+      f.content = f.content
+        .split(/(<script[\s\S]*?<\/script>)/i)
+        .map((part, i) => (i % 2 === 1 ? part : part.replace(/\\'/g, "&#39;")))
+        .join("");
     }
   }
 }
