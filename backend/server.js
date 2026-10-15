@@ -73,7 +73,7 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "8mb" }));
 
 // Fonction utilitaire pour éviter l'injection de logs (CRLF / faux logs)
 function sanitizeForLog(value) {
