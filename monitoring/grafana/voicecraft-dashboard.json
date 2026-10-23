@@ -4,7 +4,7 @@
   "tags": ["voicecraft"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 5,
+  "version": 6,
   "refresh": "30s",
   "time": { "from": "now-6h", "to": "now" },
   "templating": {
@@ -496,29 +496,104 @@
     },
     {
       "id": 13,
-      "type": "logs",
-      "title": "Logs WAF - requêtes bloquées",
+      "type": "timeseries",
+      "title": "WAF - blocages par règle",
       "datasource": { "type": "cloudwatch", "uid": "${cw}" },
       "gridPos": { "x": 0, "y": 50, "w": 12, "h": 10 },
       "targets": [
         {
           "refId": "A",
           "datasource": { "type": "cloudwatch", "uid": "${cw}" },
-          "queryMode": "Logs",
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
           "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesCommonRuleSet" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
           "id": "",
-          "queryLanguage": "CWLI",
-          "logGroups": [
-            {
-              "arn": "arn:aws:logs:eu-west-3:636361171302:log-group:aws-waf-logs-voicecraft-prod",
-              "name": "aws-waf-logs-voicecraft-prod"
-            }
-          ],
-          "expression": "fields @timestamp, action, terminatingRuleId, httpRequest.clientIp, httpRequest.country, httpRequest.uri | filter action = \"BLOCK\" | sort @timestamp desc | limit 100",
-          "statsGroups": []
+          "label": "Bloquées - Common (XSS, bots, extensions)"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesKnownBadInputsRuleSet" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées - Known bad inputs (.env)"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesAmazonIpReputationList" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées - IP reputation"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "rate-limit-api" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées - Rate limit API"
+        },
+        {
+          "refId": "E",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "CountedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesCommonRuleSet" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Comptées - Common (XSS/taille laissés passer)"
         }
       ],
-      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none" }
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 15, "showPoints": "never", "gradientMode": "opacity" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
     },
     {
       "id": 14,
