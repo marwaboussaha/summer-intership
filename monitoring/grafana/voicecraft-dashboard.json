@@ -1,55 +1,27 @@
 {
   "uid": "voicecraft-backend",
   "title": "VoiceCraft - Infrastructure & App",
-  "tags": [
-    "voicecraft"
-  ],
+  "tags": ["voicecraft"],
   "timezone": "browser",
   "schemaVersion": 39,
-  "version": 1,
+  "version": 6,
   "refresh": "30s",
-  "time": {
-    "from": "now-6h",
-    "to": "now"
-  },
+  "time": { "from": "now-6h", "to": "now" },
   "templating": {
     "list": [
-      {
-        "name": "datasource",
-        "label": "Prometheus",
-        "type": "datasource",
-        "query": "prometheus",
-        "current": {},
-        "hide": 0
-      },
-      {
-        "name": "cw",
-        "label": "CloudWatch",
-        "type": "datasource",
-        "query": "cloudwatch",
-        "current": {},
-        "hide": 0
-      },
+      { "name": "datasource", "label": "Prometheus", "type": "datasource", "query": "prometheus", "current": {}, "hide": 0 },
+      { "name": "cw", "label": "CloudWatch", "type": "datasource", "query": "cloudwatch", "current": {}, "hide": 0 },
       {
         "name": "instance",
         "label": "Server",
         "type": "query",
-        "datasource": {
-          "type": "prometheus",
-          "uid": "${datasource}"
-        },
-        "query": {
-          "query": "label_values(nodejs_heap_size_used_bytes, instance)",
-          "refId": "v"
-        },
+        "datasource": { "type": "prometheus", "uid": "${datasource}" },
+        "query": { "query": "label_values(nodejs_heap_size_used_bytes, instance)", "refId": "v" },
         "refresh": 2,
         "includeAll": true,
         "multi": true,
         "allValue": ".*",
-        "current": {
-          "text": "All",
-          "value": "$__all"
-        }
+        "current": { "text": "All", "value": "$__all" }
       }
     ]
   },
@@ -57,24 +29,13 @@
     {
       "id": 1,
       "type": "gauge",
-      "title": "Memory (heap)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 0,
-        "w": 6,
-        "h": 8
-      },
+      "title": "RAM Usage",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "100 * sum(nodejs_heap_size_used_bytes{instance=~\"$instance\"}) / sum(nodejs_heap_size_total_bytes{instance=~\"$instance\"})",
           "legendFormat": "",
           "instant": false
@@ -82,206 +43,75 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "decimals": 1,
-          "color": {
-            "mode": "continuous-GrYlRd"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 70
-              },
-              {
-                "color": "red",
-                "value": 90
-              }
-            ]
-          }
+          "unit": "percent", "min": 0, "max": 100, "decimals": 1,
+          "color": { "mode": "continuous-GrYlRd" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 70 }, { "color": "red", "value": 90 } ] }
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdMarkers": false,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "shape": "gauge",
+        "barShape": "rounded",
+        "endpointMarker": "point",
+        "sparkline": true,
+        "showThresholdMarkers": true,
         "showThresholdLabels": false,
         "orientation": "auto",
-        "sizing": "auto"
-      }
-    },
-    {
-      "id": 2,
-      "type": "gauge",
-      "title": "CPU (1 vCPU = 100%)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 6,
-        "y": 0,
-        "w": 6,
-        "h": 8
-      },
-      "targets": [
-        {
-          "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "100 * sum(rate(process_cpu_seconds_total{instance=~\"$instance\"}[2m]))",
-          "legendFormat": "",
-          "instant": false
-        }
-      ],
-      "fieldConfig": {
-        "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "decimals": 1,
-          "color": {
-            "mode": "continuous-GrYlRd"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 60
-              },
-              {
-                "color": "red",
-                "value": 85
-              }
-            ]
-          }
-        },
-        "overrides": []
-      },
-      "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdMarkers": false,
-        "showThresholdLabels": false,
-        "orientation": "auto",
-        "sizing": "auto"
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75,
+        "effects": { "barGlow": false, "centerGlow": false, "gradient": true, "rounded": true, "spotlight": false }
       }
     },
     {
       "id": 3,
       "type": "gauge",
       "title": "Erreurs 5xx",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 0,
-        "w": 6,
-        "h": 8
-      },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
-          "expr": "100 * sum(rate(http_request_duration_seconds_count{instance=~\"$instance\",status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_request_duration_seconds_count{instance=~\"$instance\"}[5m])),0.0001)",
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
+          "expr": "100 * (sum(rate(http_request_duration_seconds_count{instance=~\"$instance\",status=~\"5..\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_request_duration_seconds_count{instance=~\"$instance\"}[5m])),0.0001)",
           "legendFormat": "",
           "instant": false
         }
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "percent",
-          "min": 0,
-          "max": 100,
-          "decimals": 1,
-          "color": {
-            "mode": "continuous-GrYlRd"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 1
-              },
-              {
-                "color": "red",
-                "value": 5
-              }
-            ]
-          }
+          "unit": "percent", "min": 0, "max": 100, "decimals": 1,
+          "color": { "mode": "continuous-GrYlRd" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 } ] }
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdMarkers": false,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "shape": "gauge",
+        "barShape": "rounded",
+        "endpointMarker": "point",
+        "sparkline": true,
+        "showThresholdMarkers": true,
         "showThresholdLabels": false,
         "orientation": "auto",
-        "sizing": "auto"
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75,
+        "effects": { "barGlow": false, "centerGlow": false, "gradient": true, "rounded": true, "spotlight": false }
       }
     },
     {
       "id": 4,
       "type": "gauge",
-      "title": "Event loop lag",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 18,
-        "y": 0,
-        "w": 6,
-        "h": 8
-      },
+      "title": "Event Loop Lag",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 16, "y": 0, "w": 8, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "1000 * max(nodejs_eventloop_lag_seconds{instance=~\"$instance\"})",
           "legendFormat": "",
           "instant": false
@@ -289,68 +119,84 @@
       ],
       "fieldConfig": {
         "defaults": {
-          "unit": "ms",
-          "min": 0,
-          "max": 200,
-          "decimals": 1,
-          "color": {
-            "mode": "continuous-GrYlRd"
-          },
-          "thresholds": {
-            "mode": "absolute",
-            "steps": [
-              {
-                "color": "green",
-                "value": null
-              },
-              {
-                "color": "yellow",
-                "value": 50
-              },
-              {
-                "color": "red",
-                "value": 150
-              }
-            ]
-          }
+          "unit": "ms", "min": 0, "max": 200, "decimals": 1,
+          "color": { "mode": "continuous-GrYlRd" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 150 } ] }
         },
         "overrides": []
       },
       "options": {
-        "reduceOptions": {
-          "calcs": [
-            "lastNotNull"
-          ],
-          "fields": "",
-          "values": false
-        },
-        "showThresholdMarkers": false,
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "shape": "gauge",
+        "barShape": "rounded",
+        "endpointMarker": "point",
+        "sparkline": true,
+        "showThresholdMarkers": true,
         "showThresholdLabels": false,
         "orientation": "auto",
-        "sizing": "auto"
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75,
+        "effects": { "barGlow": false, "centerGlow": false, "gradient": true, "rounded": true, "spotlight": false }
+      }
+    },
+    {
+      "id": 2,
+      "type": "gauge",
+      "title": "CPU Usage (ECS backend)",
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 0, "y": 8, "w": 8, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/ECS",
+          "metricName": "CPUUtilization",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "backend" },
+          "statistic": "Average",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "CPU backend"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent", "min": 0, "max": 100, "decimals": 1,
+          "color": { "mode": "continuous-GrYlRd" },
+          "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "yellow", "value": 60 }, { "color": "red", "value": 85 } ] }
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false },
+        "shape": "gauge",
+        "barShape": "rounded",
+        "endpointMarker": "point",
+        "sparkline": true,
+        "showThresholdMarkers": true,
+        "showThresholdLabels": false,
+        "orientation": "auto",
+        "sizing": "auto",
+        "minVizWidth": 75,
+        "minVizHeight": 75,
+        "effects": { "barGlow": false, "centerGlow": false, "gradient": true, "rounded": true, "spotlight": false }
       }
     },
     {
       "id": 5,
       "type": "timeseries",
-      "title": "Uptime (secondes)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
+      "title": "Uptime",
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 8, "y": 8, "w": 16, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "time() - process_start_time_seconds{instance=~\"$instance\"}",
           "legendFormat": "{{instance}}"
         }
@@ -358,60 +204,32 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "gradientMode": "opacity"
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "showPoints": "never", "gradientMode": "opacity" }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
     {
       "id": 6,
       "type": "timeseries",
       "title": "Memoire RSS",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 8,
-        "w": 12,
-        "h": 8
-      },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 16, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "process_resident_memory_bytes{instance=~\"$instance\"}",
           "legendFormat": "RSS {{instance}}"
         },
         {
           "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "nodejs_heap_size_used_bytes{instance=~\"$instance\"}",
           "legendFormat": "Heap utilise {{instance}}"
         }
@@ -419,51 +237,26 @@
       "fieldConfig": {
         "defaults": {
           "unit": "bytes",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 15,
-            "showPoints": "never",
-            "gradientMode": "opacity"
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 15, "showPoints": "never", "gradientMode": "opacity" }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
     {
       "id": 7,
       "type": "timeseries",
       "title": "Requetes / seconde par route",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 16,
-        "w": 12,
-        "h": 8
-      },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 12, "y": 16, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "sum by (route) (rate(http_request_duration_seconds_count{instance=~\"$instance\"}[2m]))",
           "legendFormat": "{{route}}"
         }
@@ -471,51 +264,26 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 15,
-            "showPoints": "never",
-            "gradientMode": "opacity"
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 15, "showPoints": "never", "gradientMode": "opacity" }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
     {
       "id": 8,
       "type": "timeseries",
       "title": "Latence p95 par route",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 16,
-        "w": 12,
-        "h": 8
-      },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 24, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "histogram_quantile(0.95, sum by (le, route) (rate(http_request_duration_seconds_bucket{instance=~\"$instance\"}[5m])))",
           "legendFormat": "{{route}}"
         }
@@ -523,51 +291,26 @@
       "fieldConfig": {
         "defaults": {
           "unit": "s",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 15,
-            "showPoints": "never",
-            "gradientMode": "opacity"
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 15, "showPoints": "never", "gradientMode": "opacity" }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
     {
       "id": 9,
       "type": "timeseries",
       "title": "Requetes par code HTTP",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 24,
-        "w": 12,
-        "h": 8
-      },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 12, "y": 24, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "sum by (status) (rate(http_request_duration_seconds_count{instance=~\"$instance\"}[2m]))",
           "legendFormat": "{{status}}"
         }
@@ -575,51 +318,26 @@
       "fieldConfig": {
         "defaults": {
           "unit": "reqps",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 15,
-            "showPoints": "never",
-            "gradientMode": "opacity"
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 15, "showPoints": "never", "gradientMode": "opacity" }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
-        },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
-        }
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
     {
       "id": 10,
       "type": "timeseries",
       "title": "Cible Prometheus (1 = UP)",
-      "datasource": {
-        "type": "prometheus",
-        "uid": "${datasource}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 24,
-        "w": 12,
-        "h": 8
-      },
+      "datasource": { "type": "prometheus", "uid": "${datasource}" },
+      "gridPos": { "x": 0, "y": 32, "w": 12, "h": 8 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${datasource}"
-          },
+          "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "expr": "up{instance=~\"$instance\"}",
           "legendFormat": "{{job}} {{instance}}"
         }
@@ -627,51 +345,113 @@
       "fieldConfig": {
         "defaults": {
           "unit": "none",
-          "color": {
-            "mode": "palette-classic"
-          },
-          "custom": {
-            "lineWidth": 1,
-            "fillOpacity": 0,
-            "showPoints": "never",
-            "gradientMode": "opacity"
-          }
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 0, "showPoints": "never", "gradientMode": "opacity" }
         },
         "overrides": []
       },
       "options": {
-        "legend": {
-          "displayMode": "list",
-          "placement": "bottom",
-          "showLegend": true
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "ECS - CPU et mémoire par service",
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 12, "y": 32, "w": 12, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/ECS",
+          "metricName": "CPUUtilization",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "backend" },
+          "statistic": "Average",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "CPU backend"
         },
-        "tooltip": {
-          "mode": "multi",
-          "sort": "desc"
+        {
+          "refId": "B",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/ECS",
+          "metricName": "MemoryUtilization",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "backend" },
+          "statistic": "Average",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "Mémoire backend"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/ECS",
+          "metricName": "CPUUtilization",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "frontend" },
+          "statistic": "Average",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "CPU frontend"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/ECS",
+          "metricName": "MemoryUtilization",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "frontend" },
+          "statistic": "Average",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "Mémoire frontend"
         }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "min": 0,
+          "max": 100,
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "gradientMode": "opacity" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
     },
     {
       "id": 11,
       "type": "logs",
       "title": "Logs backend (CloudWatch)",
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cw}"
-      },
-      "gridPos": {
-        "x": 0,
-        "y": 32,
-        "w": 12,
-        "h": 10
-      },
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 0, "y": 40, "w": 12, "h": 10 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cw}"
-          },
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
           "queryMode": "Logs",
           "region": "eu-west-3",
           "id": "",
@@ -686,35 +466,18 @@
           "statsGroups": []
         }
       ],
-      "options": {
-        "showTime": true,
-        "wrapLogMessage": true,
-        "sortOrder": "Descending",
-        "enableLogDetails": true,
-        "dedupStrategy": "none"
-      }
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none" }
     },
     {
       "id": 12,
       "type": "logs",
       "title": "Logs frontend (CloudWatch)",
-      "datasource": {
-        "type": "cloudwatch",
-        "uid": "${cw}"
-      },
-      "gridPos": {
-        "x": 12,
-        "y": 32,
-        "w": 12,
-        "h": 10
-      },
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 12, "y": 40, "w": 12, "h": 10 },
       "targets": [
         {
           "refId": "A",
-          "datasource": {
-            "type": "cloudwatch",
-            "uid": "${cw}"
-          },
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
           "queryMode": "Logs",
           "region": "eu-west-3",
           "id": "",
@@ -729,13 +492,288 @@
           "statsGroups": []
         }
       ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none" }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "WAF - blocages par règle",
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 0, "y": 50, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesCommonRuleSet" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées - Common (XSS, bots, extensions)"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesKnownBadInputsRuleSet" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées - Known bad inputs (.env)"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesAmazonIpReputationList" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées - IP reputation"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "rate-limit-api" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées - Rate limit API"
+        },
+        {
+          "refId": "E",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "CountedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "AWSManagedRulesCommonRuleSet" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Comptées - Common (XSS/taille laissés passer)"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 15, "showPoints": "never", "gradientMode": "opacity" }
+        },
+        "overrides": []
+      },
       "options": {
-        "showTime": true,
-        "wrapLogMessage": true,
-        "sortOrder": "Descending",
-        "enableLogDetails": true,
-        "dedupStrategy": "none"
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
       }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "WAF - requêtes (autorisées / bloquées / comptées)",
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 12, "y": 50, "w": 12, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "AllowedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "ALL" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Autorisées"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "BlockedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "ALL" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Bloquées"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "AWS/WAFV2",
+          "metricName": "CountedRequests",
+          "dimensions": { "WebACL": "voicecraft-prod-waf", "Region": "eu-west-3", "Rule": "ALL" },
+          "statistic": "Sum",
+          "period": "300",
+          "matchExact": true,
+          "id": "",
+          "label": "Comptées"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 15, "showPoints": "never", "gradientMode": "opacity" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "ECS Container Insights - tâches et réseau",
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 0, "y": 60, "w": 24, "h": 8 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "ECS/ContainerInsights",
+          "metricName": "RunningTaskCount",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "backend" },
+          "statistic": "Average",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "Tâches backend"
+        },
+        {
+          "refId": "B",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "ECS/ContainerInsights",
+          "metricName": "RunningTaskCount",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "frontend" },
+          "statistic": "Average",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "Tâches frontend"
+        },
+        {
+          "refId": "C",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "ECS/ContainerInsights",
+          "metricName": "NetworkRxBytes",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "backend" },
+          "statistic": "Sum",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "Réseau entrant backend"
+        },
+        {
+          "refId": "D",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Metrics",
+          "metricQueryType": 0,
+          "metricEditorMode": 0,
+          "region": "eu-west-3",
+          "namespace": "ECS/ContainerInsights",
+          "metricName": "NetworkTxBytes",
+          "dimensions": { "ClusterName": "voicecraft-prod-app", "ServiceName": "backend" },
+          "statistic": "Sum",
+          "period": "60",
+          "matchExact": true,
+          "id": "",
+          "label": "Réseau sortant backend"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "color": { "mode": "palette-classic" },
+          "custom": { "lineWidth": 1, "fillOpacity": 10, "showPoints": "never", "gradientMode": "opacity" }
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": { "displayMode": "list", "placement": "bottom", "showLegend": true },
+        "tooltip": { "mode": "multi", "sort": "desc" }
+      }
+    },
+    {
+      "id": 17,
+      "type": "logs",
+      "title": "Logs Container Insights (performance ECS)",
+      "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+      "gridPos": { "x": 0, "y": 68, "w": 24, "h": 10 },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "cloudwatch", "uid": "${cw}" },
+          "queryMode": "Logs",
+          "region": "eu-west-3",
+          "id": "",
+          "queryLanguage": "CWLI",
+          "logGroups": [
+            {
+              "arn": "arn:aws:logs:eu-west-3:636361171302:log-group:/aws/ecs/containerinsights/voicecraft-prod-app/performance",
+              "name": "/aws/ecs/containerinsights/voicecraft-prod-app/performance"
+            }
+          ],
+          "expression": "fields @timestamp, Type, ServiceName, TaskId, CpuUtilized, MemoryUtilized | filter Type = \"Task\" | sort @timestamp desc | limit 100",
+          "statsGroups": []
+        }
+      ],
+      "options": { "showTime": true, "wrapLogMessage": true, "sortOrder": "Descending", "enableLogDetails": true, "dedupStrategy": "none" }
     }
   ]
 }
